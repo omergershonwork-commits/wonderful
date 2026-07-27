@@ -1,0 +1,11 @@
+airport_code,period_start,period_end,period_label,scheduled_departures,performed_departures,reported_cancellations,average_departure_delay_minutes,average_taxi_out_minutes,usable_runway_count
+BOS,2025-01-01,2025-12-31,Illustrative annual period 2025,34500,28500,6000,17.8,20.5,6
+BDL,2025-01-01,2025-12-31,Illustrative annual period 2025,10600,9400,1200,13.4,15.2,2
+PVD,2025-01-01,2025-12-31,Illustrative annual period 2025,9350,8450,900,14.1,13.8,2
+MHT,2025-01-01,2025-12-31,Illustrative annual period 2025,4150,3850,300,10.8,11.5,2
+PWM,2025-01-01,2025-12-31,Illustrative annual period 2025,5250,4650,600,12.7,12.2,2
+BTV,2025-01-01,2025-12-31,Illustrative annual period 2025,4270,3770,500,15.5,13.1,2
+LAX,2025-01-01,2025-12-31,Illustrative annual period 2025,55300,42300,13000,21.7,23.8,4
+SNA,2025-01-01,2025-12-31,Illustrative annual period 2025,14500,11000,3500,14.8,16.3,2
+ANC,2025-01-01,2025-12-31,Illustrative annual period 2025,14900,13400,1500,12.1,14.6,3
+SFO,2025-01-01,2025-12-31,Illustrative annual period 2025,44100,32100,12000,24.5,22.1,4
