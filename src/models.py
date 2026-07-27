@@ -401,11 +401,15 @@ class AnalyticalOutput(DomainModel):
                 raise ValueError("source data mode contradicts the output data mode")
         if nested_keys - top_keys:
             raise ValueError("top-level sources must include every source used by nested analyses")
-        for source in self.sources:
+        for source in [*self.sources, *nested]:
             if source.period is None:
                 raise ValueError("every analytical source must declare its data period")
-            if source.period != self.period and _source_key(source) not in nested_keys and not _periods_are_comparable(self.period, source.period):
-                raise ValueError("analytical sources may use only the current or immediately previous period")
+            if source.period != self.period and not _periods_are_comparable(
+                self.period, source.period
+            ):
+                raise ValueError(
+                    "analytical sources may use only the current or immediately previous period"
+                )
         if not any(source.period == self.period for source in self.sources):
             raise ValueError("analytical output must include at least one current-period source")
         return self
