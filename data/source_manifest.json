@@ -1,0 +1,43 @@
+{
+  "dataset_name": "Airport Investment Intelligence illustrative MVP fixtures",
+  "data_mode": "ILLUSTRATIVE DEMO DATA",
+  "retrieved_at": "2026-07-27T00:00:00Z",
+  "period": {
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "label": "Illustrative annual period 2025"
+  },
+  "disclaimer": "All passenger, seat, departure, delay, taxi, cancellation, runway-use, and route-volume values are synthetic demonstration values. They are not official FAA or BTS observations and must not be used for investment decisions.",
+  "files": {
+    "demo_airports.json": {
+      "source_name": "Illustrative airport reference fixture",
+      "notes": [
+        "Airport codes, names, cities, and states identify the supported MVP airports.",
+        "Runway counts are synthetic analytical inputs for the demonstration."
+      ]
+    },
+    "demo_traffic.csv": {
+      "source_name": "Illustrative traffic fixture",
+      "notes": [
+        "Passenger and seat totals are synthetic annual values.",
+        "Previous-period passenger totals are synthetic values used for deterministic growth calculations."
+      ]
+    },
+    "demo_routes.csv": {
+      "source_name": "Illustrative route fixture",
+      "notes": [
+        "The rows form the complete synthetic performed-departure universe used by the MVP long-haul calculation.",
+        "For every supported airport, route departures sum exactly to operations performed departures.",
+        "Distances and route volumes are demonstration inputs, not published measurements."
+      ]
+    },
+    "demo_operations.csv": {
+      "source_name": "Illustrative operations fixture",
+      "notes": [
+        "Departure, delay, taxi-out, cancellation, and runway-use values are synthetic.",
+        "Scheduled departures equal performed departures plus reported cancellations.",
+        "Performed departures equal the complete route-fixture denominator for each airport."
+      ]
+    }
+  }
+}

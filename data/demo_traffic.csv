@@ -1,0 +1,11 @@
+airport_code,period_start,period_end,period_label,passengers,previous_period_passengers,previous_period_start,previous_period_end,previous_period_label,available_seats
+BOS,2025-01-01,2025-12-31,Illustrative annual period 2025,42000000,39500000,2024-01-01,2024-12-31,Illustrative annual period 2024,49000000
+BDL,2025-01-01,2025-12-31,Illustrative annual period 2025,6200000,5900000,2024-01-01,2024-12-31,Illustrative annual period 2024,7500000
+PVD,2025-01-01,2025-12-31,Illustrative annual period 2025,4600000,4200000,2024-01-01,2024-12-31,Illustrative annual period 2024,5500000
+MHT,2025-01-01,2025-12-31,Illustrative annual period 2025,1400000,1300000,2024-01-01,2024-12-31,Illustrative annual period 2024,1750000
+PWM,2025-01-01,2025-12-31,Illustrative annual period 2025,2400000,2200000,2024-01-01,2024-12-31,Illustrative annual period 2024,2900000
+BTV,2025-01-01,2025-12-31,Illustrative annual period 2025,1350000,1250000,2024-01-01,2024-12-31,Illustrative annual period 2024,1700000
+LAX,2025-01-01,2025-12-31,Illustrative annual period 2025,75000000,72000000,2024-01-01,2024-12-31,Illustrative annual period 2024,88000000
+SNA,2025-01-01,2025-12-31,Illustrative annual period 2025,11800000,11300000,2024-01-01,2024-12-31,Illustrative annual period 2024,13500000
+ANC,2025-01-01,2025-12-31,Illustrative annual period 2025,5700000,5300000,2024-01-01,2024-12-31,Illustrative annual period 2024,7000000
+SFO,2025-01-01,2025-12-31,Illustrative annual period 2025,54000000,50000000,2024-01-01,2024-12-31,Illustrative annual period 2024,63000000

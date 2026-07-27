@@ -1,0 +1,33 @@
+origin_airport_code,destination_airport_code,destination_name,distance_miles,departures,passengers,available_seats,period_start,period_end,period_label
+BOS,LAX,Los Angeles,2611,12500,1850000,2200000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BOS,SFO,San Francisco,2704,9800,1410000,1700000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BOS,LHR,London Heathrow,3269,6200,1080000,1250000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BDL,ATL,Atlanta,859,4600,520000,640000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BDL,MCO,Orlando,1050,3900,440000,540000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BDL,LAX,Los Angeles,2521,900,116000,145000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PVD,ATL,Atlanta,903,4100,470000,570000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PVD,MCO,Orlando,1072,3500,395000,475000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PVD,DEN,Denver,1737,850,103000,128000,2025-01-01,2025-12-31,Illustrative annual period 2025
+MHT,ORD,Chicago O'Hare,843,1650,164000,205000,2025-01-01,2025-12-31,Illustrative annual period 2025
+MHT,MCO,Orlando,1142,1450,156000,194000,2025-01-01,2025-12-31,Illustrative annual period 2025
+MHT,TPA,Tampa,1204,750,76000,96000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PWM,JFK,New York JFK,273,2100,178000,225000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PWM,ORD,Chicago O'Hare,900,1850,196000,240000,2025-01-01,2025-12-31,Illustrative annual period 2025
+PWM,DEN,Denver,1782,700,77000,96000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BTV,JFK,New York JFK,266,1800,142000,182000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BTV,ORD,Chicago O'Hare,763,1450,131000,165000,2025-01-01,2025-12-31,Illustrative annual period 2025
+BTV,DEN,Denver,1639,520,55000,70000,2025-01-01,2025-12-31,Illustrative annual period 2025
+LAX,JFK,New York JFK,2475,18200,2850000,3350000,2025-01-01,2025-12-31,Illustrative annual period 2025
+LAX,HNL,Honolulu,2556,14800,2460000,2900000,2025-01-01,2025-12-31,Illustrative annual period 2025
+LAX,LHR,London Heathrow,5456,9300,1640000,1900000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SNA,SEA,Seattle,978,5100,620000,720000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SNA,DFW,Dallas/Fort Worth,1205,4700,565000,660000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SNA,JFK,New York JFK,2446,1200,154000,185000,2025-01-01,2025-12-31,Illustrative annual period 2025
+ANC,SEA,Seattle,1448,7200,910000,1120000,2025-01-01,2025-12-31,Illustrative annual period 2025
+ANC,HNL,Honolulu,2777,2400,320000,390000,2025-01-01,2025-12-31,Illustrative annual period 2025
+ANC,DFW,Dallas/Fort Worth,3043,1700,238000,285000,2025-01-01,2025-12-31,Illustrative annual period 2025
+ANC,JFK,New York JFK,3386,1200,177000,210000,2025-01-01,2025-12-31,Illustrative annual period 2025
+ANC,NRT,Tokyo Narita,3430,900,139000,165000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SFO,JFK,New York JFK,2586,15100,2320000,2700000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SFO,HNL,Honolulu,2398,9800,1510000,1790000,2025-01-01,2025-12-31,Illustrative annual period 2025
+SFO,LHR,London Heathrow,5354,7200,1260000,1460000,2025-01-01,2025-12-31,Illustrative annual period 2025
