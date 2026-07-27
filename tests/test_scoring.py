@@ -37,33 +37,13 @@ def _row(
 
 def test_scores_are_bounded_and_repeatable() -> None:
     rows = [
-        _row(
-            "AAA",
-            growth=0.01,
-            load=0.7,
-            delay=5,
-            taxi=6,
-            cancellation=0.01,
-            runway_pressure=50,
-            unmet_capacity=0,
-            passengers=100,
-        ),
-        _row(
-            "BBB",
-            growth=0.2,
-            load=0.95,
-            delay=30,
-            taxi=25,
-            cancellation=0.2,
-            runway_pressure=200,
-            unmet_capacity=5000,
-            passengers=10_000,
-        ),
+        _row("AAA", growth=0.01, load=0.7, delay=5, taxi=6, cancellation=0.01,
+             runway_pressure=50, unmet_capacity=0, passengers=100),
+        _row("BBB", growth=0.2, load=0.95, delay=30, taxi=25, cancellation=0.2,
+             runway_pressure=200, unmet_capacity=5000, passengers=10_000),
     ]
-
     first = score_airports(rows)
     second = score_airports(rows)
-
     assert first == second
     assert all(
         result.congestion_score is not None
@@ -75,17 +55,35 @@ def test_scores_are_bounded_and_repeatable() -> None:
 
 
 def test_missing_runway_is_renormalized_and_reduces_confidence() -> None:
-    scores = score_airports(
-        [
-            _row("AAA"),
-            _row("BBB", runway_pressure=None),
-        ]
-    )
-
+    scores = score_airports([_row("AAA"), _row("BBB", runway_pressure=None)])
     assert scores["BBB"].congestion_score is not None
     assert "departures_per_runway" in scores["BBB"].missing_components
     assert scores["BBB"].confidence.score < scores["AAA"].confidence.score
     assert scores["BBB"].uncertainty_penalty == 4
+
+
+def test_all_missing_congestion_inputs_are_penalized_once() -> None:
+    scores = score_airports([
+        _row("AAA"),
+        _row(
+            "BBB",
+            delay=None,
+            taxi=None,
+            cancellation=None,
+            runway_pressure=None,
+        ),
+    ])
+    result = scores["BBB"]
+    assert result.congestion_score is None
+    assert result.missing_components == (
+        "average_departure_delay_minutes",
+        "average_taxi_out_minutes",
+        "cancellation_rate",
+        "departures_per_runway",
+    )
+    assert "congestion_score" not in result.missing_components
+    assert result.uncertainty_penalty == 16
+    assert result.confidence.score == 0.5
 
 
 def test_recommendation_thresholds_are_exact() -> None:
@@ -96,18 +94,10 @@ def test_recommendation_thresholds_are_exact() -> None:
 
 
 def test_ranking_uses_deterministic_tie_breakers() -> None:
-    lower_growth = _row("AAA", growth=0.1, passengers=100)
-    higher_growth = _row("BBB", growth=0.2, passengers=100)
-    scores = score_airports([lower_growth, higher_growth])
-
-    ordered = sorted(
-        [
-            (lower_growth, scores["AAA"]),
-            (higher_growth, scores["BBB"]),
-        ],
-        key=deterministic_ranking_key,
-    )
-
+    lower = _row("AAA", growth=0.1, passengers=100)
+    higher = _row("BBB", growth=0.2, passengers=100)
+    scores = score_airports([lower, higher])
+    ordered = sorted([(lower, scores["AAA"]), (higher, scores["BBB"])], key=deterministic_ranking_key)
     assert ordered[0][0].airport_code == "BBB"
 
 
