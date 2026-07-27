@@ -13,6 +13,19 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+US_STATE_CODES = frozenset(
+    {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+        "DC",
+    }
+)
+NEW_ENGLAND_STATE_CODES = ("CT", "ME", "MA", "NH", "RI", "VT")
+
+
 class DomainModel(BaseModel):
     """Base model with strict boundary behavior shared by all domain records."""
 
@@ -52,6 +65,39 @@ class MetricUnit(StrEnum):
     DEPARTURES_PER_RUNWAY = "departures_per_runway"
 
 
+class RegionName(StrEnum):
+    """Regions explicitly supported by the current normalized dataset."""
+
+    NEW_ENGLAND = "New England"
+    WEST = "West"
+    ALASKA = "Alaska"
+
+
+class ComparisonMetric(StrEnum):
+    """Approved metrics accepted by the airport-comparison tool."""
+
+    PASSENGER_GROWTH = "passenger_growth"
+    LOAD_FACTOR = "load_factor"
+    COMPLETION_RATE = "completion_rate"
+    CANCELLATION_RATE = "cancellation_rate"
+    DEPARTURES_PER_RUNWAY = "departures_per_runway"
+    DEPARTURE_DELAY = "average_departure_delay_minutes"
+    TAXI_OUT = "average_taxi_out_minutes"
+    CONGESTION_SCORE = "congestion_score"
+    INVESTMENT_OPPORTUNITY_SCORE = "investment_opportunity_score"
+    ESTIMATED_UNMET_CAPACITY_PROXY = "estimated_unmet_capacity_proxy"
+    MARKET_SCALE = "market_scale"
+
+
+class RecommendationBand(StrEnum):
+    """Deterministic interpretation bands for the opportunity score."""
+
+    STRONG = "Strong candidate for deeper diligence"
+    POTENTIAL = "Potential candidate"
+    MIXED = "Mixed evidence"
+    WEAK = "Weak current expansion signal"
+
+
 def _normalize_airport_code(value: str) -> str:
     code = value.strip().upper()
     if len(code) != 3 or not code.isalpha():
@@ -61,9 +107,20 @@ def _normalize_airport_code(value: str) -> str:
 
 def _normalize_state_code(value: str) -> str:
     code = value.strip().upper()
-    if len(code) != 2 or not code.isalpha():
-        raise ValueError("state code must contain exactly two letters")
+    if code not in US_STATE_CODES:
+        raise ValueError("state code must be a valid US state or District of Columbia code")
     return code
+
+
+def _normalize_region(value: str | RegionName) -> RegionName:
+    if isinstance(value, RegionName):
+        return value
+    normalized = " ".join(value.strip().split()).casefold()
+    aliases = {region.value.casefold(): region for region in RegionName}
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported region: {value}") from exc
 
 
 def _normalize_airport_codes(values: list[str]) -> list[str]:
@@ -71,6 +128,17 @@ def _normalize_airport_codes(values: list[str]) -> list[str]:
     if len(normalized) != len(set(normalized)):
         raise ValueError("airport codes must be unique")
     return normalized
+
+
+def _periods_are_comparable(current: "DataPeriod", previous: "DataPeriod") -> bool:
+    """Return whether periods cover the same calendar window in different years."""
+
+    return (
+        (current.start_date.month, current.start_date.day)
+        == (previous.start_date.month, previous.start_date.day)
+        and (current.end_date.month, current.end_date.day)
+        == (previous.end_date.month, previous.end_date.day)
+    )
 
 
 class DataPeriod(DomainModel):
@@ -92,9 +160,7 @@ class SourceMetadata(DomainModel):
 
     source_name: str = Field(min_length=1)
     data_mode: DataMode
-    retrieved_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     period: DataPeriod | None = None
     source_url: str | None = None
     notes: list[str] = Field(default_factory=list)
@@ -122,7 +188,7 @@ class AirportRecord(DomainModel):
     name: str = Field(min_length=1)
     city: str = Field(min_length=1)
     state_code: str
-    region: str | None = None
+    region: RegionName | None = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     usable_runway_count: int | None = Field(default=None, ge=1)
@@ -138,14 +204,30 @@ class AirportRecord(DomainModel):
     def validate_state_code(cls, value: str) -> str:
         return _normalize_state_code(value)
 
+    @field_validator("region", mode="before")
+    @classmethod
+    def validate_region(cls, value: str | RegionName | None) -> RegionName | None:
+        return None if value is None else _normalize_region(value)
+
+    @model_validator(mode="after")
+    def validate_region_membership(self) -> "AirportRecord":
+        is_new_england_state = self.state_code in NEW_ENGLAND_STATE_CODES
+        if self.region is RegionName.NEW_ENGLAND and not is_new_england_state:
+            raise ValueError("New England airports must be in CT, ME, MA, NH, RI, or VT")
+        if is_new_england_state and self.region not in {None, RegionName.NEW_ENGLAND}:
+            raise ValueError("New England state airports cannot use another region")
+        return self
+
 
 class TrafficRecord(DomainModel):
-    """Airport-level passenger and seat totals for one analysis period."""
+    """Airport-level passenger and seat totals for comparable analysis periods."""
 
     airport_code: str
     period: DataPeriod
     passengers: int = Field(ge=0)
     previous_period_passengers: int | None = Field(default=None, ge=0)
+    previous_period: DataPeriod | None = None
+    previous_source: SourceMetadata | None = None
     available_seats: int | None = Field(default=None, ge=0)
     source: SourceMetadata
 
@@ -153,6 +235,30 @@ class TrafficRecord(DomainModel):
     @classmethod
     def validate_airport_code(cls, value: str) -> str:
         return _normalize_airport_code(value)
+
+    @model_validator(mode="after")
+    def validate_comparison_metadata(self) -> "TrafficRecord":
+        comparison_values = (
+            self.previous_period_passengers,
+            self.previous_period,
+            self.previous_source,
+        )
+        supplied = [value is not None for value in comparison_values]
+        if any(supplied) and not all(supplied):
+            raise ValueError(
+                "previous passenger count, previous period, and previous source "
+                "must be supplied together"
+            )
+        if self.source.period is not None and self.source.period != self.period:
+            raise ValueError("traffic source period must match the current traffic period")
+        if self.previous_period is not None and self.previous_source is not None:
+            if self.previous_period.end_date >= self.period.start_date:
+                raise ValueError("previous period must end before the current period")
+            if not _periods_are_comparable(self.period, self.previous_period):
+                raise ValueError("current and previous traffic periods must be comparable")
+            if self.previous_source.period != self.previous_period:
+                raise ValueError("previous source period must match the previous traffic period")
+        return self
 
 
 class RouteRecord(DomainModel):
@@ -168,19 +274,17 @@ class RouteRecord(DomainModel):
     period: DataPeriod
     source: SourceMetadata
 
-    @field_validator(
-        "origin_airport_code",
-        "destination_airport_code",
-        mode="before",
-    )
+    @field_validator("origin_airport_code", "destination_airport_code", mode="before")
     @classmethod
     def validate_airport_code(cls, value: str) -> str:
         return _normalize_airport_code(value)
 
     @model_validator(mode="after")
-    def validate_distinct_airports(self) -> "RouteRecord":
+    def validate_route(self) -> "RouteRecord":
         if self.origin_airport_code == self.destination_airport_code:
             raise ValueError("route origin and destination must differ")
+        if self.source.period is not None and self.source.period != self.period:
+            raise ValueError("route source period must match the route period")
         return self
 
 
@@ -203,18 +307,16 @@ class OperationalData(DomainModel):
         return _normalize_airport_code(value)
 
     @model_validator(mode="after")
-    def validate_departure_counts(self) -> "OperationalData":
+    def validate_operations(self) -> "OperationalData":
         if self.performed_departures > self.scheduled_departures:
-            raise ValueError(
-                "performed_departures cannot exceed scheduled_departures"
-            )
+            raise ValueError("performed_departures cannot exceed scheduled_departures")
         if (
             self.reported_cancellations is not None
             and self.reported_cancellations > self.scheduled_departures
         ):
-            raise ValueError(
-                "reported_cancellations cannot exceed scheduled_departures"
-            )
+            raise ValueError("reported_cancellations cannot exceed scheduled_departures")
+        if self.source.period is not None and self.source.period != self.period:
+            raise ValueError("operational source period must match the operations period")
         return self
 
 
@@ -242,16 +344,12 @@ class CalculatedMetrics(DomainModel):
     """Deterministically calculated airport metrics; values may be unavailable."""
 
     passenger_growth: float | None = None
-    load_factor: float | None = Field(default=None, ge=0)
+    load_factor: float | None = Field(default=None, ge=0, le=1)
     completion_rate: float | None = Field(default=None, ge=0, le=1)
     cancellation_rate: float | None = Field(default=None, ge=0, le=1)
     departures_per_runway: float | None = Field(default=None, ge=0)
     congestion_score: float | None = Field(default=None, ge=0, le=100)
-    investment_opportunity_score: float | None = Field(
-        default=None,
-        ge=0,
-        le=100,
-    )
+    investment_opportunity_score: float | None = Field(default=None, ge=0, le=100)
     estimated_unmet_capacity_proxy: float | None = Field(default=None, ge=0)
     market_scale: float | None = Field(default=None, ge=0)
     missing_components: list[str] = Field(default_factory=list)
@@ -260,10 +358,15 @@ class CalculatedMetrics(DomainModel):
 class RankAirportsInput(DomainModel):
     """Validated input for ``rank_airports``."""
 
-    region: str | None = None
+    region: RegionName | None = None
     state_codes: list[str] | None = None
     limit: int = Field(default=5, ge=1, le=10)
     excluded_airports: list[str] = Field(default_factory=list)
+
+    @field_validator("region", mode="before")
+    @classmethod
+    def validate_region(cls, value: str | RegionName | None) -> RegionName | None:
+        return None if value is None else _normalize_region(value)
 
     @field_validator("state_codes", mode="before")
     @classmethod
@@ -280,17 +383,44 @@ class RankAirportsInput(DomainModel):
     def validate_excluded_airports(cls, value: list[str]) -> list[str]:
         return _normalize_airport_codes(value)
 
+    @model_validator(mode="after")
+    def resolve_region_states(self) -> "RankAirportsInput":
+        if self.region is RegionName.NEW_ENGLAND:
+            expected = list(NEW_ENGLAND_STATE_CODES)
+            if self.state_codes is None:
+                self.state_codes = expected
+            elif set(self.state_codes) != set(expected):
+                raise ValueError(
+                    "New England must resolve to exactly CT, ME, MA, NH, RI, and VT"
+                )
+        return self
+
 
 class CompareAirportsInput(DomainModel):
     """Validated input for ``compare_airports``."""
 
     airport_codes: list[str] = Field(min_length=2, max_length=10)
-    metrics: list[str] | None = None
+    metrics: list[ComparisonMetric] | None = Field(default=None, min_length=1, max_length=11)
 
     @field_validator("airport_codes", mode="before")
     @classmethod
     def validate_airport_codes(cls, value: list[str]) -> list[str]:
         return _normalize_airport_codes(value)
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def validate_metrics(
+        cls, value: list[str | ComparisonMetric] | None
+    ) -> list[str | ComparisonMetric] | None:
+        if value is None:
+            return None
+        normalized = [
+            item if isinstance(item, ComparisonMetric) else item.strip().lower().replace("-", "_")
+            for item in value
+        ]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("comparison metrics must be unique")
+        return normalized
 
 
 class CalculateLongHaulShareInput(DomainModel):
@@ -334,7 +464,7 @@ class AirportAnalysis(DomainModel):
     airport: AirportRecord
     metrics: CalculatedMetrics
     confidence: ConfidenceInfo
-    sources: list[SourceMetadata]
+    sources: list[SourceMetadata] = Field(min_length=1)
     assumptions: list[str] = Field(default_factory=list)
 
 
@@ -343,26 +473,71 @@ class RankedAirport(DomainModel):
 
     rank: int = Field(ge=1)
     analysis: AirportAnalysis
-    recommendation: str
+    recommendation: RecommendationBand
 
 
-class RankAirportsOutput(DomainModel):
+def _collect_nested_sources(value: Any) -> list[SourceMetadata]:
+    if isinstance(value, SourceMetadata):
+        return [value]
+    if isinstance(value, BaseModel):
+        collected: list[SourceMetadata] = []
+        for field_name in value.__class__.model_fields:
+            collected.extend(_collect_nested_sources(getattr(value, field_name)))
+        return collected
+    if isinstance(value, (list, tuple, set)):
+        collected = []
+        for item in value:
+            collected.extend(_collect_nested_sources(item))
+        return collected
+    if isinstance(value, dict):
+        collected = []
+        for item in value.values():
+            collected.extend(_collect_nested_sources(item))
+        return collected
+    return []
+
+
+class AnalyticalOutput(DomainModel):
+    """Base for outputs that must expose complete, internally consistent provenance."""
+
+    data_mode: DataMode
+    period: DataPeriod
+    sources: list[SourceMetadata] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_provenance(self) -> "AnalyticalOutput":
+        for source in self.sources:
+            if source.data_mode is not self.data_mode:
+                raise ValueError("output data mode must match every source data mode")
+            if source.period is None or source.period != self.period:
+                raise ValueError("every output source period must match the output period")
+
+        nested_sources: list[SourceMetadata] = []
+        for field_name in self.__class__.model_fields:
+            if field_name in {"data_mode", "period", "sources"}:
+                continue
+            nested_sources.extend(_collect_nested_sources(getattr(self, field_name)))
+        for source in nested_sources:
+            if source.data_mode is not self.data_mode:
+                raise ValueError("nested source data mode contradicts the output data mode")
+            if source.period is not None and source.period != self.period:
+                raise ValueError("nested source period contradicts the output period")
+        return self
+
+
+class RankAirportsOutput(AnalyticalOutput):
     """Structured output from ``rank_airports``."""
 
     input: RankAirportsInput
     results: list[RankedAirport]
-    data_mode: DataMode
-    period: DataPeriod
     assumptions: list[str] = Field(default_factory=list)
 
 
-class CompareAirportsOutput(DomainModel):
+class CompareAirportsOutput(AnalyticalOutput):
     """Structured output from ``compare_airports``."""
 
     input: CompareAirportsInput
     airports: list[AirportAnalysis]
-    data_mode: DataMode
-    period: DataPeriod
     assumptions: list[str] = Field(default_factory=list)
 
 
@@ -381,7 +556,7 @@ class QualifyingRoute(DomainModel):
         return _normalize_airport_code(value)
 
 
-class LongHaulShareOutput(DomainModel):
+class LongHaulShareOutput(AnalyticalOutput):
     """Structured output from ``calculate_long_haul_share``."""
 
     input: CalculateLongHaulShareInput
@@ -393,8 +568,6 @@ class LongHaulShareOutput(DomainModel):
     passenger_share: float = Field(ge=0, le=1)
     qualifying_routes: list[QualifyingRoute]
     confidence: ConfidenceInfo
-    data_mode: DataMode
-    period: DataPeriod
     assumptions: list[str] = Field(default_factory=list)
 
 
@@ -411,25 +584,21 @@ class UnmetCapacityBreakdown(DomainModel):
     estimated_unmet_capacity_proxy: float = Field(ge=0)
 
 
-class UnmetCapacityOutput(DomainModel):
+class UnmetCapacityOutput(AnalyticalOutput):
     """Structured output from ``estimate_unmet_capacity``."""
 
     input: EstimateUnmetCapacityInput
     breakdown: UnmetCapacityBreakdown
     airport: AirportRecord
     confidence: ConfidenceInfo
-    data_mode: DataMode
-    period: DataPeriod
     assumptions: list[str] = Field(default_factory=list)
 
 
-class AirportProfileOutput(DomainModel):
+class AirportProfileOutput(AnalyticalOutput):
     """Structured output from ``get_airport_profile``."""
 
     input: GetAirportProfileInput
     analysis: AirportAnalysis
-    data_mode: DataMode
-    period: DataPeriod
 
 
 class UnavailableDataResponse(DomainModel):
