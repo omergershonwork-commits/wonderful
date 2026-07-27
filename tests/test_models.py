@@ -224,6 +224,20 @@ def test_output_requires_complete_provenance(
     )
     assert len(output.sources) == 2
 
+    stale_period = DataPeriod(
+        start_date=date(2020, 1, 1),
+        end_date=date(2020, 12, 31),
+    )
+    stale_nested = analysis(current_period, stale_period)
+    with pytest.raises(ValidationError, match="current or immediately previous period"):
+        AirportProfileOutput(
+            input=GetAirportProfileInput(airport_code="BOS"),
+            analysis=stale_nested,
+            data_mode=DataMode.ILLUSTRATIVE_DEMO_DATA,
+            period=current_period,
+            sources=stale_nested.sources,
+        )
+
     live = source(current_period, DataMode.LIVE_PUBLIC_DATA)
     with pytest.raises(ValidationError, match="data mode"):
         LongHaulShareOutput(
