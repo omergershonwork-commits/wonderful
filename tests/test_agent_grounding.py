@@ -216,3 +216,30 @@ def test_bare_load_factor_above_one_is_not_guessed_as_a_percentage():
             {"airport_code": "SFO"},
             "Estimate SFO unmet capacity at a target load factor of 1.5",
         )
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "question"),
+    [
+        (
+            "calculate_long_haul_share",
+            {"airport_code": "ANC", "threshold_miles": 5},
+            "What share of ANC flights are long haul using 2,500.5 miles?",
+        ),
+        (
+            "calculate_long_haul_share",
+            {"airport_code": "ANC", "threshold_miles": 5},
+            "What share of ANC flights are long haul using 2500.5 miles?",
+        ),
+        (
+            "rank_airports",
+            {"region": "New England", "limit": 3, "excluded_airports": []},
+            "Rank the top 3.5 New England airports",
+        ),
+    ],
+)
+def test_fractional_values_in_integer_only_fields_fail_closed(
+    tool_name, arguments, question
+):
+    with pytest.raises(ToolArgumentsError, match="whole numbers"):
+        route(tool_name, arguments, question)
+

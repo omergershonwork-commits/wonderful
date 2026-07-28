@@ -55,8 +55,9 @@ _INCLUSION_ACTIONS = frozenset({"include", "including", "with", "add", "keep"})
 _ACTION_PATTERN = re.compile(
     r"(?<![a-z0-9])(exclude|excluding|without|except|remove|include|including|with|add|keep)(?![a-z0-9])"
 )
-_SIGNED_INTEGER = r"([+-]?\d[\d,]*)"
+_SIGNED_INTEGER = r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))"
 _SIGNED_NUMBER = r"([+-]?\d+(?:\.\d+)?)"
+_FRACTIONAL_INTEGER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d+"
 
 
 def _normalized_text(value: str) -> str:
@@ -126,11 +127,24 @@ def _excluded_airports(question: str) -> tuple[str, ...]:
     return tuple(excluded)
 
 
+def _reject_fractional_integer_overrides(question: str) -> None:
+    lowered = question.casefold()
+    patterns = (
+        rf"(?<![a-z0-9])(?:top|first|limit(?:ed)?(?:\s+to)?)\s+{_FRACTIONAL_INTEGER}(?![\d.])",
+        rf"(?<![a-z0-9.,]){_FRACTIONAL_INTEGER}\s*(?:statute\s+)?miles?(?![a-z0-9])",
+        rf"(?<![a-z0-9.,]){_FRACTIONAL_INTEGER}\s+(?:airports|candidates)(?![a-z0-9])",
+    )
+    if any(re.search(pattern, lowered) for pattern in patterns):
+        raise ToolArgumentsError(
+            "ranking limits and mileage thresholds must be whole numbers"
+        )
+
+
 def _rank_limit(question: str) -> int | None:
     for pattern in (
-        rf"(?<![a-z0-9])top\s+{_SIGNED_INTEGER}(?![\d,])",
-        rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_SIGNED_INTEGER}(?![\d,])",
-        rf"(?<![a-z0-9])first\s+{_SIGNED_INTEGER}(?![\d,])",
+        rf"(?<![a-z0-9])top\s+{_SIGNED_INTEGER}(?![\d,.])",
+        rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_SIGNED_INTEGER}(?![\d,.])",
+        rf"(?<![a-z0-9])first\s+{_SIGNED_INTEGER}(?![\d,.])",
         rf"(?<![a-z0-9]){_SIGNED_INTEGER}\s+(?:airports|candidates)(?![a-z0-9])",
     ):
         match = re.search(pattern, question.casefold())
@@ -141,7 +155,7 @@ def _rank_limit(question: str) -> int | None:
 
 def _threshold_miles(question: str) -> int | None:
     match = re.search(
-        rf"(?<![a-z0-9]){_SIGNED_INTEGER}\s*(?:statute\s+)?miles?(?![a-z0-9])",
+        rf"(?<![a-z0-9.,]){_SIGNED_INTEGER}(?![\d,.])\s*(?:statute\s+)?miles?(?![a-z0-9])",
         question.casefold(),
     )
     return int(match.group(1).replace(",", "")) if match else None
@@ -215,6 +229,7 @@ class QuestionConstraints(BaseModel):
 
 
 def parse_question_constraints(question: str) -> QuestionConstraints:
+    _reject_fractional_integer_overrides(question)
     text = _normalized_text(question)
     if not text:
         raise ToolArgumentsError("question must not be empty")
