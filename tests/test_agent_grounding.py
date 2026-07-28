@@ -243,3 +243,18 @@ def test_fractional_values_in_integer_only_fields_fail_closed(
     with pytest.raises(ToolArgumentsError, match="whole numbers"):
         route(tool_name, arguments, question)
 
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "question"),
+    [
+        ("rank_airports", {"region": "New England", "limit": 3, "excluded_airports": []}, "Rank the top 3e1 New England airports"),
+        ("rank_airports", {"region": "New England", "limit": 3, "excluded_airports": []}, "Rank the top 3_5 New England airports"),
+        ("rank_airports", {"region": "New England", "limit": 5, "excluded_airports": []}, "Rank 3,5 New England airports"),
+        ("calculate_long_haul_share", {"airport_code": "ANC", "threshold_miles": 500}, "What share of ANC flights are long haul using 2_500 miles?"),
+        ("calculate_long_haul_share", {"airport_code": "ANC"}, "What share of ANC flights are long haul using 2e3 miles?"),
+        ("calculate_long_haul_share", {"airport_code": "ANC"}, "What share of ANC flights are long haul using 2,50 miles?"),
+    ],
+)
+def test_noncanonical_integer_tokens_fail_closed(tool_name, arguments, question):
+    with pytest.raises(ToolArgumentsError, match="canonical whole number"):
+        route(tool_name, arguments, question)
+

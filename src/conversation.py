@@ -9,6 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.agent import RouteSource, RoutingPolicy
 from src.models import ComparisonMetric
+from src.numeric_tokens import (
+    NUMERIC_TOKEN_PATTERN,
+    NumericTokenError,
+    find_numeric_token,
+    parse_canonical_decimal,
+    parse_canonical_integer,
+)
 
 CODES = frozenset(
     {"BOS", "BDL", "PVD", "MHT", "PWM", "BTV", "LAX", "SNA", "ANC", "SFO"}
@@ -50,11 +57,12 @@ METRICS: dict[str, ComparisonMetric] = {
 
 
 class ConversationResolutionError(RuntimeError):
-    pass
+    """Raised when a contextual follow-up cannot be resolved safely."""
 
 
 class ConversationState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
     airport_codes: tuple[str, ...] = ()
     region: str | None = None
     metric: ComparisonMetric | None = None
@@ -112,7 +120,13 @@ def _text(value: str) -> str:
 
 
 def _has(text: str, phrase: str) -> bool:
-    return re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", text) is not None
+    return (
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])",
+            text,
+        )
+        is not None
+    )
 
 
 def extract_airport_codes(question: str) -> tuple[str, ...]:
@@ -124,7 +138,8 @@ def extract_airport_codes(question: str) -> tuple[str, ...]:
             found.append((match.start(), code))
     for alias, code in ALIASES.items():
         for match in re.finditer(
-            rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", text
+            rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])",
+            text,
         ):
             found.append((match.start(), code))
     result: list[str] = []
@@ -142,53 +157,60 @@ def _metric(question: str) -> ComparisonMetric | None:
     return None
 
 
+def _conversation_integer(token: str, *, field_name: str) -> int:
+    try:
+        return parse_canonical_integer(token, field_name=field_name)
+    except NumericTokenError as exc:
+        raise ConversationResolutionError(str(exc)) from exc
+
+
+def _conversation_decimal(token: str, *, field_name: str) -> float:
+    try:
+        return parse_canonical_decimal(token, field_name=field_name)
+    except NumericTokenError as exc:
+        raise ConversationResolutionError(str(exc)) from exc
+
+
 def _percent(question: str) -> float | None:
-    match = re.search(r"(?<![a-z0-9.])([+-]?\d+(?:\.\d+)?)\s*%", question.casefold())
+    match = re.search(
+        rf"(?<![a-z0-9]){NUMERIC_TOKEN_PATTERN}\s*%",
+        question.casefold(),
+    )
     if not match:
         return None
-    value = float(match.group(1)) / 100
+    value = _conversation_decimal(match.group("token"), field_name="percentage") / 100
     if not 0 < value <= 1:
-        raise ConversationResolutionError("percentage must be greater than 0 and at most 100")
+        raise ConversationResolutionError(
+            "percentage must be greater than 0 and at most 100"
+        )
     return value
 
 
 def _miles(question: str) -> int | None:
-    lowered = question.casefold()
-    fractional = re.search(
-        r"(?<![a-z0-9.,])[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d+\s*(?:statute\s+)?miles?\b",
-        lowered,
+    token = find_numeric_token(
+        question,
+        (r"(?<![a-z0-9]){token}\s*(?:statute\s+)?miles?\b",),
     )
-    if fractional:
-        raise ConversationResolutionError(
-            "mileage threshold must be a whole number"
-        )
-    match = re.search(
-        r"(?<![a-z0-9.,])([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))(?![\d,.])\s*(?:statute\s+)?miles?\b",
-        lowered,
-    )
-    if not match:
+    if token is None:
         return None
-    value = int(match.group(1).replace(",", ""))
+    value = _conversation_integer(token, field_name="mileage threshold")
     if value <= 0:
-        raise ConversationResolutionError("mileage threshold must be greater than zero")
+        raise ConversationResolutionError(
+            "mileage threshold must be greater than zero"
+        )
     return value
 
 
 def _limit(question: str) -> int | None:
-    lowered = question.casefold()
-    fractional = re.search(
-        r"\b(?:top|first|limit(?:\s+to)?)\s+[+-]?\d+(?:\.\d+)(?![\d.])",
-        lowered,
+    token = find_numeric_token(
+        question,
+        (
+            r"\b(?:rank(?:\s+the)?|top|first|limit(?:\s+to)?)\s+{token}",
+        ),
     )
-    if fractional:
-        raise ConversationResolutionError("ranking limit must be a whole number")
-    match = re.search(
-        r"\b(?:top|first|limit(?:\s+to)?)\s+([+-]?\d{1,2})(?![\d,.])",
-        lowered,
-    )
-    if not match:
+    if token is None:
         return None
-    value = int(match.group(1))
+    value = _conversation_integer(token, field_name="ranking limit")
     if not 1 <= value <= 10:
         raise ConversationResolutionError("ranking limit must be between 1 and 10")
     return value
@@ -210,7 +232,9 @@ class ConversationManager:
         return ConversationState.from_policy(self.policy)
 
     def handle(
-        self, question: str, state: ConversationState | None = None
+        self,
+        question: str,
+        state: ConversationState | None = None,
     ) -> ConversationTurn:
         current = state or self.initial_state()
         resolved = self._resolve(question, current)
@@ -229,15 +253,23 @@ class ConversationManager:
         return ConversationTurn(execution, self._update(current, execution), used)
 
     def _resolve(
-        self, question: str, state: ConversationState
+        self,
+        question: str,
+        state: ConversationState,
     ) -> tuple[str, dict[str, Any]] | None:
         text = _text(question)
         if not text:
             raise ConversationResolutionError("question must not be empty")
-        codes, metric = extract_airport_codes(question), _metric(question)
-        percent, miles, limit = _percent(question), _miles(question), _limit(question)
+
+        codes = extract_airport_codes(question)
+        metric = _metric(question)
+        percent = _percent(question)
+        miles = _miles(question)
+        limit = _limit(question)
+
         exclude = any(
-            _has(text, word) for word in ("exclude", "excluding", "without", "remove")
+            _has(text, word)
+            for word in ("exclude", "excluding", "without", "remove")
         )
         include = any(_has(text, word) for word in ("include", "add"))
         if exclude and include:
@@ -260,6 +292,7 @@ class ConversationManager:
                 "limit": limit if limit is not None else state.ranking_limit,
                 "excluded_airports": excluded,
             }
+
         if percent is not None and any(
             _has(text, word) for word in ("use", "target", "load factor")
         ):
@@ -272,6 +305,7 @@ class ConversationManager:
                 "airport_code": selected[0],
                 "target_load_factor": percent,
             }
+
         if miles is not None and any(
             _has(text, word) for word in ("use", "threshold", "long haul")
         ):
@@ -297,7 +331,8 @@ class ConversationManager:
             )
         )
         comparison_follow_up = follow_up and any(
-            _has(text, word) for word in ("compare", "versus", "vs", "difference")
+            _has(text, word)
+            for word in ("compare", "versus", "vs", "difference")
         )
         if comparison_follow_up:
             singular = _has(text, "it")
@@ -325,6 +360,7 @@ class ConversationManager:
             elif _has(text, "same metric") and state.metric is not None:
                 args["metrics"] = [state.metric.value]
             return "compare_airports", args
+
         if metric and follow_up:
             if len(state.airport_codes) < 2:
                 raise ConversationResolutionError(
@@ -334,6 +370,7 @@ class ConversationManager:
                 "airport_codes": list(state.airport_codes),
                 "metrics": [metric.value],
             }
+
         if limit is not None and state.region and follow_up:
             return "rank_airports", {
                 "region": state.region,
@@ -343,9 +380,14 @@ class ConversationManager:
         return None
 
     @staticmethod
-    def _update(previous: ConversationState, execution: Any) -> ConversationState:
-        tool, args = str(execution.tool_name), dict(execution.arguments)
+    def _update(
+        previous: ConversationState,
+        execution: Any,
+    ) -> ConversationState:
+        tool = str(execution.tool_name)
+        args = dict(execution.arguments)
         common: dict[str, Any] = {"last_tool_name": tool}
+
         if tool == "rank_airports":
             common.update(
                 airport_codes=(),
@@ -369,7 +411,8 @@ class ConversationManager:
                 excluded_airports=(),
                 metric=None,
                 long_haul_threshold_miles=args.get(
-                    "threshold_miles", previous.long_haul_threshold_miles
+                    "threshold_miles",
+                    previous.long_haul_threshold_miles,
                 ),
             )
         elif tool == "estimate_unmet_capacity":
@@ -379,7 +422,8 @@ class ConversationManager:
                 excluded_airports=(),
                 metric=None,
                 target_load_factor=args.get(
-                    "target_load_factor", previous.target_load_factor
+                    "target_load_factor",
+                    previous.target_load_factor,
                 ),
             )
         elif tool == "get_airport_profile":
