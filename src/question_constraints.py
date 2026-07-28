@@ -16,6 +16,13 @@ from src.models import (
     RankAirportsInput,
     RegionName,
 )
+from src.numeric_tokens import (
+    NUMERIC_TOKEN_PATTERN,
+    NumericTokenError,
+    find_numeric_token,
+    parse_canonical_decimal,
+    parse_canonical_integer,
+)
 
 _AIRPORT_ALIASES: dict[str, tuple[str, ...]] = {
     "BOS": ("bos", "boston", "boston logan", "logan"),
@@ -35,7 +42,10 @@ _METRIC_PHRASES: dict[ComparisonMetric, tuple[str, ...]] = {
     ComparisonMetric.LOAD_FACTOR: ("load factor",),
     ComparisonMetric.COMPLETION_RATE: ("completion rate",),
     ComparisonMetric.CANCELLATION_RATE: ("cancellation rate", "cancellations"),
-    ComparisonMetric.DEPARTURES_PER_RUNWAY: ("departures per runway", "runway pressure"),
+    ComparisonMetric.DEPARTURES_PER_RUNWAY: (
+        "departures per runway",
+        "runway pressure",
+    ),
     ComparisonMetric.DEPARTURE_DELAY: ("departure delay", "delays"),
     ComparisonMetric.TAXI_OUT: ("taxi out", "taxi-out", "taxi time"),
     ComparisonMetric.CONGESTION_SCORE: ("congestion",),
@@ -50,14 +60,15 @@ _METRIC_PHRASES: dict[ComparisonMetric, tuple[str, ...]] = {
     ComparisonMetric.MARKET_SCALE: ("market scale", "passenger volume"),
 }
 
-_EXCLUSION_ACTIONS = frozenset({"exclude", "excluding", "without", "except", "remove"})
+_EXCLUSION_ACTIONS = frozenset(
+    {"exclude", "excluding", "without", "except", "remove"}
+)
 _INCLUSION_ACTIONS = frozenset({"include", "including", "with", "add", "keep"})
 _ACTION_PATTERN = re.compile(
-    r"(?<![a-z0-9])(exclude|excluding|without|except|remove|include|including|with|add|keep)(?![a-z0-9])"
+    r"(?<![a-z0-9])"
+    r"(exclude|excluding|without|except|remove|include|including|with|add|keep)"
+    r"(?![a-z0-9])"
 )
-_SIGNED_NUMBER = r"([+-]?\d+(?:\.\d+)?)"
-_INTEGER_TOKEN = r"([+-]?[0-9](?:[0-9a-z_]|[.,](?=[0-9])|[+-](?=[0-9]))*)"
-_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
 
 
 def _normalized_text(value: str) -> str:
@@ -74,10 +85,10 @@ def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
 
 
 def _airport_mentions(question: str) -> tuple[tuple[int, str], ...]:
-    """Return every distinct airport occurrence in textual order.
+    """Return every airport occurrence in textual order.
 
-    Long aliases win over overlapping shorter aliases, but repeated mentions of the
-    same airport remain separate so sequential include/exclude actions are honored.
+    Longer aliases win over overlapping shorter aliases, while repeated mentions of
+    the same airport remain separate so sequential include/exclude actions work.
     """
 
     text = _normalized_text(question)
@@ -94,9 +105,12 @@ def _airport_mentions(question: str) -> tuple[tuple[int, str], ...]:
     candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
     selected: list[tuple[int, int, str]] = []
     for start, end, code in candidates:
-        if any(not (end <= used_start or start >= used_end) for used_start, used_end, _ in selected):
-            continue
-        selected.append((start, end, code))
+        overlaps = any(
+            not (end <= used_start or start >= used_end)
+            for used_start, used_end, _ in selected
+        )
+        if not overlaps:
+            selected.append((start, end, code))
     selected.sort(key=lambda item: item[0])
     return tuple((start, code) for start, _, code in selected)
 
@@ -127,50 +141,61 @@ def _excluded_airports(question: str) -> tuple[str, ...]:
     return tuple(excluded)
 
 
-def _parse_canonical_integer(token: str, *, field_name: str) -> int:
-    if _CANONICAL_INTEGER.fullmatch(token) is None:
-        raise ToolArgumentsError(
-            f"{field_name} must use canonical whole numbers "
-            "with optional sign and correctly grouped commas"
-        )
-    return int(token.replace(",", ""))
+def _tool_integer(token: str, *, field_name: str) -> int:
+    try:
+        return parse_canonical_integer(token, field_name=field_name)
+    except NumericTokenError as exc:
+        raise ToolArgumentsError(str(exc)) from exc
+
+
+def _tool_decimal(token: str, *, field_name: str) -> float:
+    try:
+        return parse_canonical_decimal(token, field_name=field_name)
+    except NumericTokenError as exc:
+        raise ToolArgumentsError(str(exc)) from exc
 
 
 def _rank_limit(question: str) -> int | None:
+    token = find_numeric_token(
+        question,
+        (
+            r"(?<![a-z0-9])rank(?:\s+the)?\s+{token}",
+            r"(?<![a-z0-9])top\s+{token}",
+            r"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{token}",
+            r"(?<![a-z0-9])first\s+{token}",
+            r"(?<![a-z0-9]){token}\s+(?:airports|candidates)(?![a-z0-9])",
+        ),
+    )
+    return None if token is None else _tool_integer(token, field_name="ranking limit")
+
+
+def _threshold_miles(question: str) -> int | None:
+    token = find_numeric_token(
+        question,
+        (r"(?<![a-z0-9]){token}\s*(?:statute\s+)?miles?(?![a-z0-9])",),
+    )
+    return None if token is None else _tool_integer(
+        token,
+        field_name="mileage threshold",
+    )
+
+
+def _target_load_factor(question: str) -> float | None:
     lowered = question.casefold()
     patterns = (
-        rf"(?<![a-z0-9])rank(?:\s+the)?\s+{_INTEGER_TOKEN}",
-        rf"(?<![a-z0-9])top\s+{_INTEGER_TOKEN}",
-        rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_INTEGER_TOKEN}",
-        rf"(?<![a-z0-9])first\s+{_INTEGER_TOKEN}",
-        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\s+(?:airports|candidates)(?![a-z0-9])",
+        rf"(?:target\s+)?load\s+factor(?:\s+(?:of|at|to|=))?\s+"
+        rf"{NUMERIC_TOKEN_PATTERN}(?P<percent>%?)",
+        rf"{NUMERIC_TOKEN_PATTERN}(?P<percent>%)\s+"
+        rf"(?:target\s+)?load\s+factor",
     )
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
-            return _parse_canonical_integer(match.group(1), field_name="ranking limit")
-    return None
-
-
-def _threshold_miles(question: str) -> int | None:
-    match = re.search(
-        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\s*(?:statute\s+)?miles?(?![a-z0-9])",
-        question.casefold(),
-    )
-    if not match:
-        return None
-    return _parse_canonical_integer(match.group(1), field_name="mileage threshold")
-
-
-def _target_load_factor(question: str) -> float | None:
-    for pattern in (
-        rf"(?:target\s+)?load\s+factor(?:\s+(?:of|at|to|=))?\s+{_SIGNED_NUMBER}(%?)",
-        rf"{_SIGNED_NUMBER}(%)\s+(?:target\s+)?load\s+factor",
-    ):
-        match = re.search(pattern, question.casefold())
-        if match:
-            value = float(match.group(1))
-            return value / 100 if match.group(2) == "%" else value
+            value = _tool_decimal(
+                match.group("token"),
+                field_name="target load factor",
+            )
+            return value / 100 if match.group("percent") == "%" else value
     return None
 
 
@@ -185,6 +210,7 @@ def _requested_metrics(question: str) -> tuple[ComparisonMetric, ...]:
 
 class QuestionConstraints(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
     expected_tool: str
     airport_codes: tuple[str, ...] = ()
     region: RegionName | None = None
@@ -198,7 +224,11 @@ class QuestionConstraints(BaseModel):
         if self.expected_tool == "rank_airports":
             return {
                 "region": (self.region or RegionName.NEW_ENGLAND).value,
-                "limit": self.rank_limit if self.rank_limit is not None else policy.ranking_limit,
+                "limit": (
+                    self.rank_limit
+                    if self.rank_limit is not None
+                    else policy.ranking_limit
+                ),
                 "excluded_airports": list(self.excluded_airports),
             }
         if self.expected_tool == "compare_airports":
@@ -254,7 +284,8 @@ def parse_question_constraints(question: str) -> QuestionConstraints:
             rank_limit=_rank_limit(question),
         )
     if len(airports) >= 2 and _contains_any(
-        text, ("compare", "versus", "vs", "difference", "congestion")
+        text,
+        ("compare", "versus", "vs", "difference", "congestion"),
     ):
         return QuestionConstraints(
             expected_tool="compare_airports",
@@ -262,7 +293,8 @@ def parse_question_constraints(question: str) -> QuestionConstraints:
             requested_metrics=_requested_metrics(question),
         )
     if len(airports) == 1 and _contains_any(
-        text, ("long haul", "longhaul", "long distance")
+        text,
+        ("long haul", "longhaul", "long distance"),
     ):
         return QuestionConstraints(
             expected_tool="calculate_long_haul_share",
@@ -270,7 +302,8 @@ def parse_question_constraints(question: str) -> QuestionConstraints:
             threshold_miles=_threshold_miles(question),
         )
     if len(airports) == 1 and _contains_any(
-        text, ("unmet", "flight demand", "seat demand", "capacity", "lost demand")
+        text,
+        ("unmet", "flight demand", "seat demand", "capacity", "lost demand"),
     ):
         return QuestionConstraints(
             expected_tool="estimate_unmet_capacity",
@@ -278,9 +311,13 @@ def parse_question_constraints(question: str) -> QuestionConstraints:
             target_load_factor=_target_load_factor(question),
         )
     if len(airports) == 1 and _contains_any(
-        text, ("profile", "overview", "details", "information", "tell me about")
+        text,
+        ("profile", "overview", "details", "information", "tell me about"),
     ):
-        return QuestionConstraints(expected_tool="get_airport_profile", airport_codes=airports)
+        return QuestionConstraints(
+            expected_tool="get_airport_profile",
+            airport_codes=airports,
+        )
     raise ToolArgumentsError(
         "The question does not establish a supported deterministic tool intent"
     )
@@ -310,21 +347,27 @@ def validate_question_semantics(
 ) -> None:
     if tool_name != constraints.expected_tool:
         raise ToolArgumentsError(
-            f"Selected tool {tool_name} contradicts requested intent {constraints.expected_tool}"
+            f"Selected tool {tool_name} contradicts requested intent "
+            f"{constraints.expected_tool}"
         )
     expected = constraints.expected_arguments(policy)
     if isinstance(request, RankAirportsInput):
         if request.region is not constraints.region or request.limit != expected["limit"]:
             raise ToolArgumentsError("Ranking region or limit contradicts the question")
         if set(request.excluded_airports) != set(constraints.excluded_airports):
-            raise ToolArgumentsError("Ranking exclusions must exactly match the named airports")
+            raise ToolArgumentsError(
+                "Ranking exclusions must exactly match the named airports"
+            )
         return
     if isinstance(request, CompareAirportsInput):
         if tuple(request.airport_codes) != constraints.airport_codes:
-            raise ToolArgumentsError("Comparison airports must match the question in order")
+            raise ToolArgumentsError(
+                "Comparison airports must match the question in order"
+            )
         if tuple(request.metrics or ()) != constraints.requested_metrics:
             raise ToolArgumentsError(
-                "Comparison metric selector must exactly match explicitly requested metrics"
+                "Comparison metric selector must exactly match explicitly requested "
+                "metrics"
             )
         return
     if isinstance(request, CalculateLongHaulShareInput):
@@ -332,14 +375,21 @@ def validate_question_semantics(
             request.airport_code != constraints.airport_codes[0]
             or request.threshold_miles != expected["threshold_miles"]
         ):
-            raise ToolArgumentsError("Long-haul airport or threshold contradicts the question")
+            raise ToolArgumentsError(
+                "Long-haul airport or threshold contradicts the question"
+            )
         return
     if isinstance(request, EstimateUnmetCapacityInput):
         if (
             request.airport_code != constraints.airport_codes[0]
-            or abs(request.target_load_factor - expected["target_load_factor"]) > 1e-12
+            or abs(
+                request.target_load_factor - expected["target_load_factor"]
+            )
+            > 1e-12
         ):
-            raise ToolArgumentsError("Capacity airport or target load factor contradicts the question")
+            raise ToolArgumentsError(
+                "Capacity airport or target load factor contradicts the question"
+            )
         return
     if isinstance(request, GetAirportProfileInput):
         if request.airport_code != constraints.airport_codes[0]:
