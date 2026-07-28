@@ -120,6 +120,26 @@ def test_exclusion_actions_apply_only_to_airports_in_their_scope():
     assert result.arguments["excluded_airports"] == ["BOS"]
 
 
+@pytest.mark.parametrize(
+    ("question", "excluded"),
+    [
+        ("Rank New England airports exclude Boston but include Boston", []),
+        ("Rank New England airports include Boston but exclude Boston", ["BOS"]),
+    ],
+)
+def test_repeated_actions_on_the_same_airport_are_applied_in_order(question, excluded):
+    result = route(
+        "rank_airports",
+        {
+            "region": "New England",
+            "limit": 5,
+            "excluded_airports": excluded,
+        },
+        question,
+    )
+    assert result.arguments["excluded_airports"] == excluded
+
+
 def test_runtime_policy_supplies_omitted_numeric_defaults():
     policy = RoutingPolicy(
         ranking_limit=4,
@@ -187,3 +207,12 @@ def test_negative_overrides_are_not_reinterpreted_as_positive(
 ):
     with pytest.raises(ToolArgumentsError, match="failed validation"):
         route(tool_name, arguments, question)
+
+
+def test_bare_load_factor_above_one_is_not_guessed_as_a_percentage():
+    with pytest.raises(ToolArgumentsError, match="failed validation"):
+        route(
+            "estimate_unmet_capacity",
+            {"airport_code": "SFO"},
+            "Estimate SFO unmet capacity at a target load factor of 1.5",
+        )
