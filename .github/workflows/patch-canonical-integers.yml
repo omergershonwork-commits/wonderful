@@ -1,0 +1,57 @@
+name: Patch canonical integer parsing
+
+on:
+  push:
+    branches:
+      - codex/phase-9-tool-calling
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase-9-tool-calling
+          fetch-depth: 0
+
+      - name: Patch parser and tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/question_constraints.py')
+          text = path.read_text(encoding='utf-8')
+          old_constants = '''_SIGNED_INTEGER = r"([+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+))"\n_SIGNED_NUMBER = r"([+-]?\\d+(?:\\.\\d+)?)"\n_FRACTIONAL_INTEGER = r"[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)\\.\\d+"\n'''
+          new_constants = '''_SIGNED_NUMBER = r"([+-]?\\d+(?:\\.\\d+)?)"\n_INTEGER_TOKEN = r"([+-]?[0-9][0-9a-z_,.+-]*)"\n_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\\d+|\\d{1,3}(?:,\\d{3})+)")\n'''
+          if old_constants not in text:
+              raise SystemExit('integer constants block not found')
+          text = text.replace(old_constants, new_constants, 1)
+
+          start = text.index('def _reject_fractional_integer_overrides')
+          end = text.index('def _target_load_factor')
+          replacement = '''def _parse_canonical_integer(token: str, *, field_name: str) -> int:\n    if _CANONICAL_INTEGER.fullmatch(token) is None:\n        raise ToolArgumentsError(\n            f"{field_name} must be a canonical whole number "\n            "with optional sign and correctly grouped commas"\n        )\n    return int(token.replace(",", ""))\n\n\ndef _rank_limit(question: str) -> int | None:\n    lowered = question.casefold()\n    patterns = (\n        rf"(?<![a-z0-9])top\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9])limit(?:ed)?(?:\\s+to)?\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9])first\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\\s+(?:airports|candidates)(?![a-z0-9])",\n    )\n    for pattern in patterns:\n        match = re.search(pattern, lowered)\n        if match:\n            return _parse_canonical_integer(match.group(1), field_name="ranking limit")\n    return None\n\n\ndef _threshold_miles(question: str) -> int | None:\n    match = re.search(\n        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\\s*(?:statute\\s+)?miles?(?![a-z0-9])",\n        question.casefold(),\n    )\n    if not match:\n        return None\n    return _parse_canonical_integer(match.group(1), field_name="mileage threshold")\n\n\n'''
+          text = text[:start] + replacement + text[end:]
+          text = text.replace('    _reject_fractional_integer_overrides(question)\n', '', 1)
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_agent_grounding.py')
+          tests = test_path.read_text(encoding='utf-8')
+          addition = '''\n\n@pytest.mark.parametrize(\n    ("tool_name", "arguments", "question"),\n    [\n        (\n            "rank_airports",\n            {"region": "New England", "limit": 3, "excluded_airports": []},\n            "Rank the top 3e1 New England airports",\n        ),\n        (\n            "rank_airports",\n            {"region": "New England", "limit": 3, "excluded_airports": []},\n            "Rank the top 3_5 New England airports",\n        ),\n        (\n            "rank_airports",\n            {"region": "New England", "limit": 5, "excluded_airports": []},\n            "Rank 3,5 New England airports",\n        ),\n        (\n            "calculate_long_haul_share",\n            {"airport_code": "ANC", "threshold_miles": 500},\n            "What share of ANC flights are long haul using 2_500 miles?",\n        ),\n        (\n            "calculate_long_haul_share",\n            {"airport_code": "ANC"},\n            "What share of ANC flights are long haul using 2e3 miles?",\n        ),\n        (\n            "calculate_long_haul_share",\n            {"airport_code": "ANC"},\n            "What share of ANC flights are long haul using 2,50 miles?",\n        ),\n    ],\n)\ndef test_noncanonical_integer_tokens_fail_closed(tool_name, arguments, question):\n    with pytest.raises(ToolArgumentsError, match="canonical whole number"):\n        route(tool_name, arguments, question)\n\n\n@pytest.mark.parametrize(\n    ("question", "expected"),\n    [\n        ("What share of ANC flights are long haul using 2500 miles?", 2500),\n        ("What share of ANC flights are long haul using 2,500 miles?", 2500),\n        ("What share of ANC flights are long haul using +2500 miles?", 2500),\n    ],\n)\ndef test_canonical_mileage_tokens_are_preserved(question, expected):\n    result = route(\n        "calculate_long_haul_share",\n        {"airport_code": "ANC", "threshold_miles": expected},\n        question,\n    )\n    assert result.arguments["threshold_miles"] == expected\n'''
+          if 'test_noncanonical_integer_tokens_fail_closed' not in tests:
+              test_path.write_text(tests.rstrip() + addition + '\n', encoding='utf-8')
+          PY
+
+      - name: Remove temporary workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/patch-canonical-integers.yml
+          git config user.name "omergershonwork-commits"
+          git config user.email "237711942+omergershonwork-commits@users.noreply.github.com"
+          git add src/question_constraints.py tests/test_agent_grounding.py .github/workflows/patch-canonical-integers.yml
+          git commit -m "fix(parser): require canonical whole integer tokens"
+          git push origin HEAD:codex/phase-9-tool-calling
