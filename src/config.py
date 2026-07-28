@@ -1,6 +1,6 @@
 """Environment-backed application configuration."""
-
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     use_live_data: bool = False
     http_timeout_seconds: int = Field(default=20, gt=0, le=120)
+    public_data_cache_dir: Path = Path("data/cache/public")
+    public_data_cache_ttl_seconds: int = Field(default=86_400, ge=0, le=2_592_000)
+    public_data_max_download_mb: int = Field(default=100, gt=0, le=1_024)
+    bts_app_token: str = ""
 
     long_haul_threshold_miles: int = Field(default=3000, gt=0)
     target_load_factor: float = 0.82
