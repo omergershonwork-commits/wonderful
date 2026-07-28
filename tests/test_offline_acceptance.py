@@ -33,7 +33,11 @@ from src.data.public_clients import (
     PublicDataInvalidResponseError,
 )
 from src.models import ComparisonMetric
-from src.router import AirportQuestionRouter, DeterministicFallbackRouter
+from src.router import (
+    AirportQuestionRouter,
+    DeterministicFallbackRouter,
+    FallbackRoutingError,
+)
 from src.scoring import AirportScoringInput, score_airports
 from src.tools import AirportAnalyticsService
 
@@ -383,7 +387,7 @@ def test_fractional_integer_overrides_fail_in_complete_offline_path(
     question,
 ):
     _, _, router = offline_runtime
-    with pytest.raises(ToolArgumentsError, match="whole numbers"):
+    with pytest.raises(FallbackRoutingError):
         router.route(question)
 
 
