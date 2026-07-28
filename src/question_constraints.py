@@ -73,25 +73,43 @@ def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
 
 
 def _airport_mentions(question: str) -> tuple[tuple[int, str], ...]:
+    """Return every distinct airport occurrence in textual order.
+
+    Long aliases win over overlapping shorter aliases, but repeated mentions of the
+    same airport remain separate so sequential include/exclude actions are honored.
+    """
+
     text = _normalized_text(question)
-    positions: list[tuple[int, str]] = []
+    candidates: list[tuple[int, int, str]] = []
     for code, aliases in _AIRPORT_ALIASES.items():
-        hits = [
-            text.find(_normalized_text(alias))
-            for alias in aliases
-            if _contains_phrase(text, alias)
-        ]
-        if hits:
-            positions.append((min(hits), code))
-    return tuple(sorted(positions))
+        for alias in aliases:
+            normalized = _normalized_text(alias)
+            pattern = re.compile(
+                rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])"
+            )
+            for match in pattern.finditer(text):
+                candidates.append((match.start(), match.end(), code))
+
+    candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
+    selected: list[tuple[int, int, str]] = []
+    for start, end, code in candidates:
+        if any(not (end <= used_start or start >= used_end) for used_start, used_end, _ in selected):
+            continue
+        selected.append((start, end, code))
+    selected.sort(key=lambda item: item[0])
+    return tuple((start, code) for start, _, code in selected)
 
 
 def mentioned_airports(question: str) -> tuple[str, ...]:
-    return tuple(code for _, code in _airport_mentions(question))
+    result: list[str] = []
+    for _, code in _airport_mentions(question):
+        if code not in result:
+            result.append(code)
+    return tuple(result)
 
 
 def _excluded_airports(question: str) -> tuple[str, ...]:
-    """Bind each airport to the nearest preceding include/exclude action."""
+    """Apply each include/exclude action to the following airport occurrence."""
 
     text = _normalized_text(question)
     actions = [(match.start(), match.group(1)) for match in _ACTION_PATTERN.finditer(text)]
@@ -137,10 +155,7 @@ def _target_load_factor(question: str) -> float | None:
         match = re.search(pattern, question.casefold())
         if match:
             value = float(match.group(1))
-            is_percent = match.group(2) == "%"
-            if is_percent:
-                return value / 100
-            return value / 100 if abs(value) > 1 else value
+            return value / 100 if match.group(2) == "%" else value
     return None
 
 
@@ -168,11 +183,7 @@ class QuestionConstraints(BaseModel):
         if self.expected_tool == "rank_airports":
             return {
                 "region": (self.region or RegionName.NEW_ENGLAND).value,
-                "limit": (
-                    self.rank_limit
-                    if self.rank_limit is not None
-                    else policy.ranking_limit
-                ),
+                "limit": self.rank_limit if self.rank_limit is not None else policy.ranking_limit,
                 "excluded_airports": list(self.excluded_airports),
             }
         if self.expected_tool == "compare_airports":
@@ -254,9 +265,7 @@ def parse_question_constraints(question: str) -> QuestionConstraints:
     if len(airports) == 1 and _contains_any(
         text, ("profile", "overview", "details", "information", "tell me about")
     ):
-        return QuestionConstraints(
-            expected_tool="get_airport_profile", airport_codes=airports
-        )
+        return QuestionConstraints(expected_tool="get_airport_profile", airport_codes=airports)
     raise ToolArgumentsError(
         "The question does not establish a supported deterministic tool intent"
     )
@@ -293,15 +302,11 @@ def validate_question_semantics(
         if request.region is not constraints.region or request.limit != expected["limit"]:
             raise ToolArgumentsError("Ranking region or limit contradicts the question")
         if set(request.excluded_airports) != set(constraints.excluded_airports):
-            raise ToolArgumentsError(
-                "Ranking exclusions must exactly match the named airports"
-            )
+            raise ToolArgumentsError("Ranking exclusions must exactly match the named airports")
         return
     if isinstance(request, CompareAirportsInput):
         if tuple(request.airport_codes) != constraints.airport_codes:
-            raise ToolArgumentsError(
-                "Comparison airports must match the question in order"
-            )
+            raise ToolArgumentsError("Comparison airports must match the question in order")
         if tuple(request.metrics or ()) != constraints.requested_metrics:
             raise ToolArgumentsError(
                 "Comparison metric selector must exactly match explicitly requested metrics"
@@ -312,21 +317,14 @@ def validate_question_semantics(
             request.airport_code != constraints.airport_codes[0]
             or request.threshold_miles != expected["threshold_miles"]
         ):
-            raise ToolArgumentsError(
-                "Long-haul airport or threshold contradicts the question"
-            )
+            raise ToolArgumentsError("Long-haul airport or threshold contradicts the question")
         return
     if isinstance(request, EstimateUnmetCapacityInput):
         if (
             request.airport_code != constraints.airport_codes[0]
-            or abs(
-                request.target_load_factor - expected["target_load_factor"]
-            )
-            > 1e-12
+            or abs(request.target_load_factor - expected["target_load_factor"]) > 1e-12
         ):
-            raise ToolArgumentsError(
-                "Capacity airport or target load factor contradicts the question"
-            )
+            raise ToolArgumentsError("Capacity airport or target load factor contradicts the question")
         return
     if isinstance(request, GetAirportProfileInput):
         if request.airport_code != constraints.airport_codes[0]:
