@@ -411,3 +411,14 @@ def test_on_time_rejects_nan_and_infinite_delay_or_taxi_values(
     )
     with pytest.raises(PublicDataInvalidResponseError, match="non-finite"):
         client.fetch_origin_month("SFO", 2026, 5)
+
+
+@pytest.mark.parametrize("value", ["1,2,3", "12,34", "1_000", "1e3"])
+def test_malformed_public_numeric_tokens_are_rejected(value):
+    with pytest.raises(PublicDataInvalidResponseError):
+        _parse_number(value, field_name="passengers")
+
+
+@pytest.mark.parametrize(("value", "expected"), [("1000", 1000), ("1,000", 1000), ("1,000.5", 1000.5)])
+def test_canonical_public_numeric_tokens_are_accepted(value, expected):
+    assert _parse_number(value, field_name="passengers") == expected

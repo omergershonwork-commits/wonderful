@@ -22,6 +22,7 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 
 from src.config import Settings
 from src.models import DataMode, DataPeriod, DomainModel, SourceMetadata
+from src.numeric_tokens import NumericTokenError, parse_canonical_decimal
 
 T = TypeVar("T")
 
@@ -69,9 +70,10 @@ def _parse_number(
 ) -> int | float:
     if value is None or str(value).strip() == "":
         raise PublicDataInvalidResponseError(f"missing numeric field: {field_name}")
+    token = str(value).strip()
     try:
-        number = float(str(value).replace(",", ""))
-    except (TypeError, ValueError) as exc:
+        number = parse_canonical_decimal(token, field_name=field_name)
+    except NumericTokenError as exc:
         raise PublicDataInvalidResponseError(
             f"invalid numeric field: {field_name}"
         ) from exc
