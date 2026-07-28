@@ -71,6 +71,10 @@ def _parse_number(
     if value is None or str(value).strip() == "":
         raise PublicDataInvalidResponseError(f"missing numeric field: {field_name}")
     token = str(value).strip()
+    if token.casefold() in {"nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}:
+        raise PublicDataInvalidResponseError(
+            f"non-finite numeric field: {field_name}"
+        )
     try:
         number = parse_canonical_decimal(token, field_name=field_name)
     except NumericTokenError as exc:
