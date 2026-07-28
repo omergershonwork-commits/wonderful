@@ -1,0 +1,40 @@
+name: Patch Fractional Acceptance Tests
+
+on:
+  push:
+    branches:
+      - codex/phase-15-comprehensive-offline-tests
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase-15-comprehensive-offline-tests
+          fetch-depth: 0
+      - name: Add fractional acceptance regressions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_offline_acceptance.py')
+          text = path.read_text(encoding='utf-8')
+          addition = '''\n\n@pytest.mark.parametrize(\n    "question",\n    [\n        "What share of ANC flights are long haul using 2,500.5 miles?",\n        "What share of ANC flights are long haul using 2500.5 miles?",\n        "Rank the top 3.5 New England airports.",\n    ],\n)\ndef test_fractional_integer_overrides_fail_in_complete_offline_path(\n    offline_runtime,\n    question,\n):\n    _, _, router = offline_runtime\n    with pytest.raises(ToolArgumentsError, match="whole numbers"):\n        router.route(question)\n\n\n@pytest.mark.parametrize(\n    ("question", "state"),\n    [\n        ("Use 2,500.5 miles", ConversationState(airport_codes=("ANC",))),\n        ("Use 2500.5 miles", ConversationState(airport_codes=("ANC",))),\n        ("What about top 3.5?", ConversationState(region="New England")),\n    ],\n)\ndef test_fractional_contextual_values_fail_in_complete_offline_path(\n    offline_runtime,\n    question,\n    state,\n):\n    policy, dispatcher, router = offline_runtime\n    manager = ConversationManager(router, dispatcher, policy=policy)\n    with pytest.raises(ConversationResolutionError, match="whole number"):\n        manager.handle(question, state)\n'''
+          if 'test_fractional_integer_overrides_fail_in_complete_offline_path' not in text:
+              path.write_text(text.rstrip() + addition + '\n', encoding='utf-8')
+          PY
+      - name: Commit acceptance tests
+        shell: bash
+        run: |
+          rm .github/workflows/patch-fractional-acceptance.yml
+          git config user.name "omergershonwork-commits"
+          git config user.email "237711942+omergershonwork-commits@users.noreply.github.com"
+          git add tests/test_offline_acceptance.py .github/workflows/patch-fractional-acceptance.yml
+          git commit -m "test: cover fractional integer overrides end to end"
+          git push origin HEAD:codex/phase-15-comprehensive-offline-tests
