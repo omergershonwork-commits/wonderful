@@ -1,0 +1,139 @@
+........................................................................ [ 26%]
+........................................................................ [ 52%]
+...................................FFF.................................. [ 79%]
+.......FFFFFFF..........................................                 [100%]
+=================================== FAILURES ===================================
+________________ test_non_finite_public_values_fail_closed[nan] ________________
+
+value = 'nan'
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    def test_non_finite_public_values_fail_closed(value):
+>       with pytest.raises(PublicDataInvalidResponseError, match="non-finite"):
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'non-finite'
+E         Actual message: 'invalid numeric field: test value'
+
+tests/test_offline_acceptance.py:372: AssertionError
+________________ test_non_finite_public_values_fail_closed[inf] ________________
+
+value = 'inf'
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    def test_non_finite_public_values_fail_closed(value):
+>       with pytest.raises(PublicDataInvalidResponseError, match="non-finite"):
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'non-finite'
+E         Actual message: 'invalid numeric field: test value'
+
+tests/test_offline_acceptance.py:372: AssertionError
+_______________ test_non_finite_public_values_fail_closed[-inf] ________________
+
+value = '-inf'
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    def test_non_finite_public_values_fail_closed(value):
+>       with pytest.raises(PublicDataInvalidResponseError, match="non-finite"):
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'non-finite'
+E         Actual message: 'invalid numeric field: test value'
+
+tests/test_offline_acceptance.py:372: AssertionError
+___________ test_malformed_public_numeric_tokens_are_rejected[1,2,3] ___________
+
+value = '1,2,3'
+
+    @pytest.mark.parametrize("value", ["1,2,3", "12,34", "1_000", "1e3"])
+    def test_malformed_public_numeric_tokens_are_rejected(value):
+        with pytest.raises(PublicDataInvalidResponseError):
+>           _parse_number(value, field_name="passengers")
+            ^^^^^^^^^^^^^
+E           NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:419: NameError
+___________ test_malformed_public_numeric_tokens_are_rejected[12,34] ___________
+
+value = '12,34'
+
+    @pytest.mark.parametrize("value", ["1,2,3", "12,34", "1_000", "1e3"])
+    def test_malformed_public_numeric_tokens_are_rejected(value):
+        with pytest.raises(PublicDataInvalidResponseError):
+>           _parse_number(value, field_name="passengers")
+            ^^^^^^^^^^^^^
+E           NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:419: NameError
+___________ test_malformed_public_numeric_tokens_are_rejected[1_000] ___________
+
+value = '1_000'
+
+    @pytest.mark.parametrize("value", ["1,2,3", "12,34", "1_000", "1e3"])
+    def test_malformed_public_numeric_tokens_are_rejected(value):
+        with pytest.raises(PublicDataInvalidResponseError):
+>           _parse_number(value, field_name="passengers")
+            ^^^^^^^^^^^^^
+E           NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:419: NameError
+____________ test_malformed_public_numeric_tokens_are_rejected[1e3] ____________
+
+value = '1e3'
+
+    @pytest.mark.parametrize("value", ["1,2,3", "12,34", "1_000", "1e3"])
+    def test_malformed_public_numeric_tokens_are_rejected(value):
+        with pytest.raises(PublicDataInvalidResponseError):
+>           _parse_number(value, field_name="passengers")
+            ^^^^^^^^^^^^^
+E           NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:419: NameError
+_________ test_canonical_public_numeric_tokens_are_accepted[1000-1000] _________
+
+value = '1000', expected = 1000
+
+    @pytest.mark.parametrize(("value", "expected"), [("1000", 1000), ("1,000", 1000), ("1,000.5", 1000.5)])
+    def test_canonical_public_numeric_tokens_are_accepted(value, expected):
+>       assert _parse_number(value, field_name="passengers") == expected
+               ^^^^^^^^^^^^^
+E       NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:424: NameError
+________ test_canonical_public_numeric_tokens_are_accepted[1,000-1000] _________
+
+value = '1,000', expected = 1000
+
+    @pytest.mark.parametrize(("value", "expected"), [("1000", 1000), ("1,000", 1000), ("1,000.5", 1000.5)])
+    def test_canonical_public_numeric_tokens_are_accepted(value, expected):
+>       assert _parse_number(value, field_name="passengers") == expected
+               ^^^^^^^^^^^^^
+E       NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:424: NameError
+______ test_canonical_public_numeric_tokens_are_accepted[1,000.5-1000.5] _______
+
+value = '1,000.5', expected = 1000.5
+
+    @pytest.mark.parametrize(("value", "expected"), [("1000", 1000), ("1,000", 1000), ("1,000.5", 1000.5)])
+    def test_canonical_public_numeric_tokens_are_accepted(value, expected):
+>       assert _parse_number(value, field_name="passengers") == expected
+               ^^^^^^^^^^^^^
+E       NameError: name '_parse_number' is not defined
+
+tests/test_public_clients.py:424: NameError
+=========================== short test summary info ============================
+FAILED tests/test_offline_acceptance.py::test_non_finite_public_values_fail_closed[nan] - AssertionError: Regex pattern did not match.
+  Expected regex: 'non-finite'
+  Actual message: 'invalid numeric field: test value'
+FAILED tests/test_offline_acceptance.py::test_non_finite_public_values_fail_closed[inf] - AssertionError: Regex pattern did not match.
+  Expected regex: 'non-finite'
+  Actual message: 'invalid numeric field: test value'
+FAILED tests/test_offline_acceptance.py::test_non_finite_public_values_fail_closed[-inf] - AssertionError: Regex pattern did not match.
+  Expected regex: 'non-finite'
+  Actual message: 'invalid numeric field: test value'
+FAILED tests/test_public_clients.py::test_malformed_public_numeric_tokens_are_rejected[1,2,3] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_malformed_public_numeric_tokens_are_rejected[12,34] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_malformed_public_numeric_tokens_are_rejected[1_000] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_malformed_public_numeric_tokens_are_rejected[1e3] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_canonical_public_numeric_tokens_are_accepted[1000-1000] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_canonical_public_numeric_tokens_are_accepted[1,000-1000] - NameError: name '_parse_number' is not defined
+FAILED tests/test_public_clients.py::test_canonical_public_numeric_tokens_are_accepted[1,000.5-1000.5] - NameError: name '_parse_number' is not defined
