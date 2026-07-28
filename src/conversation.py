@@ -158,7 +158,7 @@ def _percent(question: str) -> float | None:
 def _parse_canonical_integer(token: str, *, field_name: str) -> int:
     if _CANONICAL_INTEGER.fullmatch(token) is None:
         raise ConversationResolutionError(
-            f"{field_name} must be a canonical whole number "
+            f"{field_name} must use canonical whole numbers "
             "with optional sign and correctly grouped commas"
         )
     return int(token.replace(",", ""))
