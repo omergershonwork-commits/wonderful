@@ -1,0 +1,325 @@
+name: Apply shared numeric token parser
+
+on:
+  push:
+    branches:
+      - codex/canonical-integer-followup
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/canonical-integer-followup
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply parser refactor and tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          numeric = '''"""Shared complete-token numeric parsing for user and public-data boundaries."""
+          from __future__ import annotations
+
+          import re
+          from collections.abc import Iterable
+
+          NUMERIC_TOKEN_PATTERN = r"(?P<token>[+-]?\\d(?:[\\dA-Za-z_]|[.,+-](?=\\d))*)"
+          _CANONICAL_INTEGER = re.compile(r"[+-]?(?:\\d+|\\d{1,3}(?:,\\d{3})+)")
+          _CANONICAL_DECIMAL = re.compile(
+              r"[+-]?(?:(?:\\d+|\\d{1,3}(?:,\\d{3})+)(?:\\.\\d+)?)"
+          )
+
+
+          class NumericTokenError(ValueError):
+              """Raised when an explicitly supplied numeric token is unsupported."""
+
+
+          def find_numeric_token(text: str, patterns: Iterable[str]) -> str | None:
+              """Return the first complete numeric-like token matched by a context pattern."""
+
+              lowered = text.casefold()
+              for template in patterns:
+                  match = re.search(template.format(token=NUMERIC_TOKEN_PATTERN), lowered)
+                  if match:
+                      return match.group("token")
+              return None
+
+
+          def parse_canonical_integer(token: str, *, field_name: str) -> int:
+              """Parse a signed whole integer with optional standard thousands grouping."""
+
+              if _CANONICAL_INTEGER.fullmatch(token) is None:
+                  raise NumericTokenError(
+                      f"{field_name} must use canonical whole numbers with optional sign "
+                      "and correctly grouped commas"
+                  )
+              return int(token.replace(",", ""))
+
+
+          def parse_canonical_decimal(token: str, *, field_name: str) -> float:
+              """Parse a finite decimal without exponent, underscore, range, or bad grouping."""
+
+              if _CANONICAL_DECIMAL.fullmatch(token) is None:
+                  raise NumericTokenError(
+                      f"{field_name} must use a canonical decimal number with optional sign, "
+                      "a decimal point, and correctly grouped commas"
+                  )
+              return float(token.replace(",", ""))
+          '''
+          Path('src/numeric_tokens.py').write_text(numeric, encoding='utf-8')
+
+          path = Path('src/question_constraints.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'from src.models import (',
+              'from src.numeric_tokens import (\n'
+              '    NUMERIC_TOKEN_PATTERN,\n'
+              '    NumericTokenError,\n'
+              '    find_numeric_token,\n'
+              '    parse_canonical_decimal,\n'
+              '    parse_canonical_integer,\n'
+              ')\nfrom src.models import ('
+          )
+          text = re.sub(
+              r'_SIGNED_NUMBER = .*?_CANONICAL_INTEGER = re\.compile\([^\n]+\)\n',
+              '',
+              text,
+              flags=re.DOTALL,
+          )
+          start = text.index('def _parse_canonical_integer(')
+          end = text.index('\ndef _requested_metrics(', start)
+          replacement = '''def _tool_integer(token: str, *, field_name: str) -> int:
+              try:
+                  return parse_canonical_integer(token, field_name=field_name)
+              except NumericTokenError as exc:
+                  raise ToolArgumentsError(str(exc)) from exc
+
+
+          def _tool_decimal(token: str, *, field_name: str) -> float:
+              try:
+                  return parse_canonical_decimal(token, field_name=field_name)
+              except NumericTokenError as exc:
+                  raise ToolArgumentsError(str(exc)) from exc
+
+
+          def _rank_limit(question: str) -> int | None:
+              token = find_numeric_token(
+                  question,
+                  (
+                      r"(?<![a-z0-9])rank(?:\\s+the)?\\s+{token}",
+                      r"(?<![a-z0-9])top\\s+{token}",
+                      r"(?<![a-z0-9])limit(?:ed)?(?:\\s+to)?\\s+{token}",
+                      r"(?<![a-z0-9])first\\s+{token}",
+                      r"(?<![a-z0-9]){token}\\s+(?:airports|candidates)(?![a-z0-9])",
+                  ),
+              )
+              return None if token is None else _tool_integer(token, field_name="ranking limit")
+
+
+          def _threshold_miles(question: str) -> int | None:
+              token = find_numeric_token(
+                  question,
+                  (r"(?<![a-z0-9]){token}\\s*(?:statute\\s+)?miles?(?![a-z0-9])",),
+              )
+              return None if token is None else _tool_integer(token, field_name="mileage threshold")
+
+
+          def _target_load_factor(question: str) -> float | None:
+              lowered = question.casefold()
+              patterns = (
+                  rf"(?:target\\s+)?load\\s+factor(?:\\s+(?:of|at|to|=))?\\s+{NUMERIC_TOKEN_PATTERN}(?P<percent>%?)",
+                  rf"{NUMERIC_TOKEN_PATTERN}(?P<percent>%)\\s+(?:target\\s+)?load\\s+factor",
+              )
+              for pattern in patterns:
+                  match = re.search(pattern, lowered)
+                  if match:
+                      value = _tool_decimal(match.group("token"), field_name="target load factor")
+                      return value / 100 if match.group("percent") == "%" else value
+              return None
+
+'''
+          text = text[:start] + replacement + text[end+1:]
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('src/conversation.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'from src.models import ComparisonMetric',
+              'from src.models import ComparisonMetric\n'
+              'from src.numeric_tokens import (\n'
+              '    NUMERIC_TOKEN_PATTERN,\n'
+              '    NumericTokenError,\n'
+              '    find_numeric_token,\n'
+              '    parse_canonical_decimal,\n'
+              '    parse_canonical_integer,\n'
+              ')'
+          )
+          text = re.sub(
+              r'_INTEGER_TOKEN = .*?_CANONICAL_INTEGER = re\.compile\([^\n]+\)\n\n',
+              '',
+              text,
+              flags=re.DOTALL,
+          )
+          start = text.index('def _percent(')
+          end = text.index('\n\nclass ConversationManager:', start)
+          replacement = '''def _conversation_integer(token: str, *, field_name: str) -> int:
+              try:
+                  return parse_canonical_integer(token, field_name=field_name)
+              except NumericTokenError as exc:
+                  raise ConversationResolutionError(str(exc)) from exc
+
+
+          def _conversation_decimal(token: str, *, field_name: str) -> float:
+              try:
+                  return parse_canonical_decimal(token, field_name=field_name)
+              except NumericTokenError as exc:
+                  raise ConversationResolutionError(str(exc)) from exc
+
+
+          def _percent(question: str) -> float | None:
+              match = re.search(
+                  rf"(?<![a-z0-9]){NUMERIC_TOKEN_PATTERN}\\s*%",
+                  question.casefold(),
+              )
+              if not match:
+                  return None
+              value = _conversation_decimal(match.group("token"), field_name="percentage") / 100
+              if not 0 < value <= 1:
+                  raise ConversationResolutionError(
+                      "percentage must be greater than 0 and at most 100"
+                  )
+              return value
+
+
+          def _miles(question: str) -> int | None:
+              token = find_numeric_token(
+                  question,
+                  (r"(?<![a-z0-9]){token}\\s*(?:statute\\s+)?miles?\\b",),
+              )
+              if token is None:
+                  return None
+              value = _conversation_integer(token, field_name="mileage threshold")
+              if value <= 0:
+                  raise ConversationResolutionError(
+                      "mileage threshold must be greater than zero"
+                  )
+              return value
+
+
+          def _limit(question: str) -> int | None:
+              token = find_numeric_token(
+                  question,
+                  (
+                      r"\\b(?:rank(?:\\s+the)?|top|first|limit(?:\\s+to)?)\\s+{token}",
+                  ),
+              )
+              if token is None:
+                  return None
+              value = _conversation_integer(token, field_name="ranking limit")
+              if not 1 <= value <= 10:
+                  raise ConversationResolutionError(
+                      "ranking limit must be between 1 and 10"
+                  )
+              return value
+'''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          tests = '''from __future__ import annotations
+
+          import pytest
+
+          from src.agent import RoutingPolicy, ToolDispatcher
+          from src.conversation import (
+              ConversationManager,
+              ConversationResolutionError,
+              ConversationState,
+          )
+          from src.numeric_tokens import (
+              NumericTokenError,
+              parse_canonical_decimal,
+              parse_canonical_integer,
+          )
+          from src.router import AirportQuestionRouter, DeterministicFallbackRouter, FallbackRoutingError
+          from src.tools import AirportAnalyticsService
+
+
+          @pytest.fixture
+          def runtime():
+              policy = RoutingPolicy()
+              dispatcher = ToolDispatcher(AirportAnalyticsService())
+              fallback = DeterministicFallbackRouter(dispatcher, policy=policy)
+              router = AirportQuestionRouter(None, fallback=fallback)
+              return router, ConversationManager(router, dispatcher, policy=policy)
+
+
+          @pytest.mark.parametrize("token, expected", [
+              ("2500", 2500), ("+2500", 2500), ("-2,500", -2500), ("2,500", 2500)
+          ])
+          def test_canonical_integer_tokens(token, expected):
+              assert parse_canonical_integer(token, field_name="value") == expected
+
+
+          @pytest.mark.parametrize("token", [
+              "3.5", "3e1", "3_5", "3-5", "3,5", "2_500", "2-500", "2e3", "2,50"
+          ])
+          def test_noncanonical_integer_tokens(token):
+              with pytest.raises(NumericTokenError):
+                  parse_canonical_integer(token, field_name="value")
+
+
+          @pytest.mark.parametrize("token", ["1e2", "0.8e1", "85,5", "85_5", "85e-1"])
+          def test_noncanonical_decimal_tokens(token):
+              with pytest.raises(NumericTokenError):
+                  parse_canonical_decimal(token, field_name="value")
+
+
+          @pytest.mark.parametrize("question", [
+              "Rank the top 3e1 New England airports",
+              "Rank the top 3_5 New England airports",
+              "Rank the top 3-5 New England airports",
+              "Rank 3,5 New England airports",
+              "What share of ANC flights are long haul using 2_500 miles?",
+              "What share of ANC flights are long haul using 2-500 miles?",
+              "What share of ANC flights are long haul using 2e3 miles?",
+              "What share of ANC flights are long haul using 2,50 miles?",
+              "Estimate SFO unmet capacity at target load factor 1e2",
+              "Estimate SFO unmet capacity at target load factor 0.8e1",
+          ])
+          def test_initial_questions_reject_unsupported_complete_tokens(runtime, question):
+              router, _ = runtime
+              with pytest.raises(FallbackRoutingError):
+                  router.route(question)
+
+
+          @pytest.mark.parametrize("question, state", [
+              ("Use 2_500 miles", ConversationState(airport_codes=("ANC",))),
+              ("Use 2-500 miles", ConversationState(airport_codes=("ANC",))),
+              ("What about top 3e1?", ConversationState(region="New England")),
+              ("What about top 3_5?", ConversationState(region="New England")),
+              ("Use 85,5%", ConversationState(airport_codes=("SFO",))),
+              ("Use 85_5%", ConversationState(airport_codes=("SFO",))),
+              ("Use 85e-1%", ConversationState(airport_codes=("SFO",))),
+          ])
+          def test_followups_reject_unsupported_complete_tokens(runtime, question, state):
+              _, manager = runtime
+              with pytest.raises(ConversationResolutionError):
+                  manager.handle(question, state)
+          '''
+          Path('tests/test_numeric_token_regressions.py').write_text(tests, encoding='utf-8')
+          PY
+          python -m compileall -q src tests
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/numeric_tokens.py src/question_constraints.py src/conversation.py tests/test_numeric_token_regressions.py
+          git commit -m "Share complete-token numeric parsing" || exit 0
+          git push origin HEAD:codex/canonical-integer-followup
