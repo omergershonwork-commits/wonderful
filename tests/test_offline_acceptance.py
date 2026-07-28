@@ -369,3 +369,39 @@ def test_non_finite_public_values_fail_closed(value):
         _parse_number(value, field_name="test value")
     with pytest.raises(PublicDataInvalidResponseError, match="non-finite"):
         _optional_nonnegative(value, field_name="departure delay")
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What share of ANC flights are long haul using 2,500.5 miles?",
+        "What share of ANC flights are long haul using 2500.5 miles?",
+        "Rank the top 3.5 New England airports.",
+    ],
+)
+def test_fractional_integer_overrides_fail_in_complete_offline_path(
+    offline_runtime,
+    question,
+):
+    _, _, router = offline_runtime
+    with pytest.raises(ToolArgumentsError, match="whole numbers"):
+        router.route(question)
+
+
+@pytest.mark.parametrize(
+    ("question", "state"),
+    [
+        ("Use 2,500.5 miles", ConversationState(airport_codes=("ANC",))),
+        ("Use 2500.5 miles", ConversationState(airport_codes=("ANC",))),
+        ("What about top 3.5?", ConversationState(region="New England")),
+    ],
+)
+def test_fractional_contextual_values_fail_in_complete_offline_path(
+    offline_runtime,
+    question,
+    state,
+):
+    policy, dispatcher, router = offline_runtime
+    manager = ConversationManager(router, dispatcher, policy=policy)
+    with pytest.raises(ConversationResolutionError, match="whole number"):
+        manager.handle(question, state)
+
