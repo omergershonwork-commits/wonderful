@@ -18,34 +18,12 @@ jobs:
         with:
           ref: codex/canonical-integer-followup
 
-      - name: Apply exact compatibility fixes
+      - name: Add focused public parser import
         if: github.actor != 'github-actions[bot]'
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          path = Path('src/data/public_clients.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''    token = str(value).strip()
-    try:
-        number = parse_canonical_decimal(token, field_name=field_name)
-'''
-          new = '''    token = str(value).strip()
-    if token.casefold() in {
-        "nan", "+nan", "-nan", "inf", "+inf", "-inf",
-        "infinity", "+infinity", "-infinity",
-    }:
-        raise PublicDataInvalidResponseError(
-            f"non-finite numeric field: {field_name}"
-        )
-    try:
-        number = parse_canonical_decimal(token, field_name=field_name)
-'''
-          if old not in text:
-              raise SystemExit('public parser patch point not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-
           path = Path('tests/test_public_clients.py')
           text = path.read_text(encoding='utf-8')
           old = '''    PublicDataNotFoundError,
@@ -55,14 +33,15 @@ jobs:
     PublicDataTimeoutError,
     _parse_number,
 )'''
-          if old not in text:
-              raise SystemExit('test import patch point not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          if '_parse_number,' not in text:
+              if old not in text:
+                  raise SystemExit('test import patch point not found')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/data/public_clients.py tests/test_public_clients.py
-          git commit -m "Preserve public numeric validation contracts" || true
+          git add tests/test_public_clients.py
+          git commit -m "Import public numeric parser in focused tests" || true
           git push origin HEAD:codex/canonical-integer-followup
 
       - name: Set up Python
