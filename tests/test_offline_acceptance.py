@@ -409,3 +409,36 @@ def test_fractional_contextual_values_fail_in_complete_offline_path(
     with pytest.raises(ConversationResolutionError, match="whole number"):
         manager.handle(question, state)
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Rank the top 3e1 New England airports",
+        "Rank the top 3_5 New England airports",
+        "Rank 3,5 New England airports",
+        "What share of ANC flights are long haul using 2_500 miles?",
+        "What share of ANC flights are long haul using 2e3 miles?",
+        "What share of ANC flights are long haul using 2,50 miles?",
+    ],
+)
+def test_noncanonical_integer_tokens_fail_in_complete_offline_path(offline_runtime, question):
+    _, _, router = offline_runtime
+    with pytest.raises(FallbackRoutingError):
+        router.route(question)
+
+
+@pytest.mark.parametrize(
+    ("question", "state"),
+    [
+        ("What about top 3e1?", ConversationState(region="New England")),
+        ("What about top 3_5?", ConversationState(region="New England")),
+        ("Use 2_500 miles", ConversationState(airport_codes=("ANC",))),
+        ("Use 2e3 miles", ConversationState(airport_codes=("ANC",))),
+        ("Use 2,50 miles", ConversationState(airport_codes=("ANC",))),
+    ],
+)
+def test_noncanonical_contextual_tokens_fail_in_complete_offline_path(offline_runtime, question, state):
+    policy, dispatcher, router = offline_runtime
+    manager = ConversationManager(router, dispatcher, policy=policy)
+    with pytest.raises(ConversationResolutionError, match="canonical whole number"):
+        manager.handle(question, state)
+

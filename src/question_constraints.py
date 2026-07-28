@@ -55,9 +55,9 @@ _INCLUSION_ACTIONS = frozenset({"include", "including", "with", "add", "keep"})
 _ACTION_PATTERN = re.compile(
     r"(?<![a-z0-9])(exclude|excluding|without|except|remove|include|including|with|add|keep)(?![a-z0-9])"
 )
-_SIGNED_INTEGER = r"([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))"
 _SIGNED_NUMBER = r"([+-]?\d+(?:\.\d+)?)"
-_FRACTIONAL_INTEGER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d+"
+_INTEGER_TOKEN = r"([+-]?[0-9](?:[0-9a-z_]|[.,](?=[0-9])|[+-](?=[0-9]))*)"
+_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
 
 
 def _normalized_text(value: str) -> str:
@@ -127,38 +127,38 @@ def _excluded_airports(question: str) -> tuple[str, ...]:
     return tuple(excluded)
 
 
-def _reject_fractional_integer_overrides(question: str) -> None:
-    lowered = question.casefold()
-    patterns = (
-        rf"(?<![a-z0-9])(?:top|first|limit(?:ed)?(?:\s+to)?)\s+{_FRACTIONAL_INTEGER}(?![\d.])",
-        rf"(?<![a-z0-9.,]){_FRACTIONAL_INTEGER}\s*(?:statute\s+)?miles?(?![a-z0-9])",
-        rf"(?<![a-z0-9.,]){_FRACTIONAL_INTEGER}\s+(?:airports|candidates)(?![a-z0-9])",
-    )
-    if any(re.search(pattern, lowered) for pattern in patterns):
+def _parse_canonical_integer(token: str, *, field_name: str) -> int:
+    if _CANONICAL_INTEGER.fullmatch(token) is None:
         raise ToolArgumentsError(
-            "ranking limits and mileage thresholds must be whole numbers"
+            f"{field_name} must be a canonical whole number "
+            "with optional sign and correctly grouped commas"
         )
+    return int(token.replace(",", ""))
 
 
 def _rank_limit(question: str) -> int | None:
-    for pattern in (
-        rf"(?<![a-z0-9])top\s+{_SIGNED_INTEGER}(?![\d,.])",
-        rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_SIGNED_INTEGER}(?![\d,.])",
-        rf"(?<![a-z0-9])first\s+{_SIGNED_INTEGER}(?![\d,.])",
-        rf"(?<![a-z0-9]){_SIGNED_INTEGER}\s+(?:airports|candidates)(?![a-z0-9])",
-    ):
-        match = re.search(pattern, question.casefold())
+    lowered = question.casefold()
+    patterns = (
+        rf"(?<![a-z0-9])top\s+{_INTEGER_TOKEN}",
+        rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_INTEGER_TOKEN}",
+        rf"(?<![a-z0-9])first\s+{_INTEGER_TOKEN}",
+        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\s+(?:airports|candidates)(?![a-z0-9])",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
         if match:
-            return int(match.group(1).replace(",", ""))
+            return _parse_canonical_integer(match.group(1), field_name="ranking limit")
     return None
 
 
 def _threshold_miles(question: str) -> int | None:
     match = re.search(
-        rf"(?<![a-z0-9.,]){_SIGNED_INTEGER}(?![\d,.])\s*(?:statute\s+)?miles?(?![a-z0-9])",
+        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\s*(?:statute\s+)?miles?(?![a-z0-9])",
         question.casefold(),
     )
-    return int(match.group(1).replace(",", "")) if match else None
+    if not match:
+        return None
+    return _parse_canonical_integer(match.group(1), field_name="mileage threshold")
 
 
 def _target_load_factor(question: str) -> float | None:
@@ -229,7 +229,6 @@ class QuestionConstraints(BaseModel):
 
 
 def parse_question_constraints(question: str) -> QuestionConstraints:
-    _reject_fractional_integer_overrides(question)
     text = _normalized_text(question)
     if not text:
         raise ToolArgumentsError("question must not be empty")
