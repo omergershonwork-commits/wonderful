@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="930" viewBox="0 0 1400 930" role="img" aria-labelledby="title desc">
+  <title id="title">Illustrative reconstruction of the Airport Investment Intelligence Agent interface</title>
+  <desc id="desc">A manually authored illustrative reconstruction of the deterministic Streamlit interface. It is not the PNG produced by the automated browser workflow.</desc>
+  <rect width="1400" height="930" fill="#ffffff"/>
+  <rect x="0" y="0" width="1400" height="34" fill="#fff3cd"/>
+  <text x="700" y="23" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" text-anchor="middle" fill="#664d03">ILLUSTRATIVE RECONSTRUCTION — NOT THE AUTOMATED WORKFLOW SCREENSHOT</text>
+  <rect x="0" y="34" width="260" height="896" fill="#f0f2f6"/>
+  <g transform="translate(0 30)" font-family="Arial, Helvetica, sans-serif" fill="#17233c">
+    <text x="28" y="72" font-size="22" font-weight="700">Runtime status</text>
+    <rect x="28" y="92" width="204" height="42" rx="8" fill="#ffffff" stroke="#c5cad3"/>
+    <text x="130" y="118" font-size="14" text-anchor="middle">Refresh LM Studio status</text>
+    <rect x="28" y="154" width="204" height="112" rx="8" fill="#dce9fb"/>
+    <text x="43" y="184" font-size="16" font-weight="700" fill="#0758a8">Deterministic mode</text>
+    <text x="43" y="222" font-size="15" fill="#0758a8">LM Studio integration is</text>
+    <text x="43" y="246" font-size="15" fill="#0758a8">disabled.</text>
+    <text x="28" y="310" font-size="15">LM Studio endpoint:</text>
+    <text x="28" y="336" font-size="14" fill="#198754">http://localhost:1234/v1</text>
+    <text x="28" y="380" font-size="15">Configured model: <tspan fill="#198754">not set</tspan></text>
+    <text x="28" y="424" font-size="15">Long-haul threshold: <tspan font-weight="700">3,000 miles</tspan></text>
+    <text x="28" y="468" font-size="15">Target load factor: <tspan font-weight="700">82%</tspan></text>
+    <text x="28" y="512" font-size="15">Minimum annual passengers:</text>
+    <text x="28" y="538" font-size="15" font-weight="700">100,000</text>
+    <rect x="28" y="565" width="204" height="42" rx="8" fill="#ffffff" stroke="#c5cad3"/>
+    <text x="130" y="591" font-size="14" text-anchor="middle">Clear conversation</text>
+
+    <text x="330" y="105" font-size="42" font-weight="700">Airport Investment Intelligence Agent</text>
+    <text x="330" y="143" font-size="16" fill="#677287">Deterministic airport-capacity screening with optional local Qwen tool selection</text>
+    <rect x="330" y="168" width="1010" height="54" rx="8" fill="#e6f0ff"/>
+    <text x="348" y="201" font-size="15" fill="#0758a8">Ask a suggested question, then continue with follow-ups such as “Exclude Boston”, “What about passenger growth?”, or “Use 85%”.</text>
+
+    <text x="330" y="266" font-size="24" font-weight="700">Suggested questions</text>
+    <rect x="330" y="287" width="500" height="43" rx="7" fill="#f7f8fa" stroke="#c5cad3"/>
+    <text x="580" y="313" font-size="14" text-anchor="middle">Which airports in New England are strong candidates for terminal expansion?</text>
+
+    <rect x="330" y="350" width="1010" height="56" rx="8" fill="#f6f7f9"/>
+    <circle cx="360" cy="378" r="15" fill="#ff4b4b"/>
+    <text x="388" y="384" font-size="16">Which airports in New England are strong candidates for terminal expansion?</text>
+
+    <circle cx="360" cy="448" r="15" fill="#ff9f1c"/>
+    <text x="388" y="454" font-size="17">Deterministic airport ranking:</text>
+    <g font-size="15">
+      <text x="410" y="490">• Rank 1: BOS; opportunity score 63.55; recommendation Potential candidate; confidence HIGH.</text>
+      <text x="410" y="522">• Rank 2: PVD; opportunity score 61.0; recommendation Potential candidate; confidence HIGH.</text>
+      <text x="410" y="554">• Rank 3: PWM; opportunity score 48.3; recommendation Mixed evidence; confidence HIGH.</text>
+      <text x="410" y="586">• Rank 4: BDL; opportunity score 35.6; recommendation Weak current expansion signal; confidence HIGH.</text>
+      <text x="410" y="618">• Rank 5: BTV; opportunity score 32.3; recommendation Weak current expansion signal; confidence HIGH.</text>
+    </g>
+
+    <text x="388" y="666" font-size="17" font-weight="700">Provenance</text>
+    <g font-size="15">
+      <text x="410" y="700">• Source mode: ILLUSTRATIVE DEMO DATA.</text>
+      <text x="410" y="732">• Analysis period: 2025-01-01 to 2025-12-31.</text>
+      <text x="410" y="764">• Sources: airport, traffic, operations, and previous-period fixture records.</text>
+      <text x="410" y="796">• New England means CT, ME, MA, NH, RI, and VT.</text>
+      <text x="410" y="828">• Scores are deterministic screening proxies, not expected financial return.</text>
+    </g>
+  </g>
+  <rect x="0.5" y="0.5" width="1399" height="929" fill="none" stroke="#d8dde6"/>
+</svg>
