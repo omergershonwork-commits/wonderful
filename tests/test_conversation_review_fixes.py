@@ -136,3 +136,26 @@ def test_fractional_contextual_ranking_limit_fails_closed():
     with pytest.raises(ConversationResolutionError, match="whole number"):
         manager().handle("What about top 3.5?", state)
 
+@pytest.mark.parametrize("question", ["What about top 3e1?", "What about top 3_5?", "What about top 3,5?"])
+def test_noncanonical_contextual_ranking_limit_fails_closed(question):
+    state = ConversationState(region="New England")
+    with pytest.raises(ConversationResolutionError, match="canonical whole number"):
+        manager().handle(question, state)
+
+
+@pytest.mark.parametrize("question", ["Use 2_500 miles", "Use 2e3 miles", "Use 2,50 miles"])
+def test_noncanonical_contextual_mileage_fails_closed(question):
+    state = ConversationState(airport_codes=("ANC",))
+    with pytest.raises(ConversationResolutionError, match="canonical whole number"):
+        manager().handle(question, state)
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [("Use 2500 miles", 2500), ("Use 2,500 miles", 2500), ("Use +2500 miles", 2500)],
+)
+def test_canonical_contextual_mileage_is_preserved(question, expected):
+    state = ConversationState(airport_codes=("ANC",))
+    turn = manager().handle(question, state)
+    assert turn.execution.arguments["threshold_miles"] == expected
+
