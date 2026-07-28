@@ -1,0 +1,37 @@
+name: Patch nonfinite numeric classification
+
+on:
+  push:
+    branches:
+      - codex/canonical-integer-followup
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/canonical-integer-followup
+      - name: Apply patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/data/public_clients.py')
+          text = path.read_text()
+          old = '''    token = str(value).strip()\n    try:\n        number = parse_canonical_decimal(token, field_name=field_name)\n'''
+          new = '''    token = str(value).strip()\n    if token.casefold() in {"nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}:\n        raise PublicDataInvalidResponseError(\n            f"non-finite numeric field: {field_name}"\n        )\n    try:\n        number = parse_canonical_decimal(token, field_name=field_name)\n'''
+          if old not in text:
+              raise SystemExit('target block not found')
+          path.write_text(text.replace(old, new))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/data/public_clients.py
+          git commit -m "Preserve non-finite public numeric classification"
+          git push origin HEAD:codex/canonical-integer-followup
