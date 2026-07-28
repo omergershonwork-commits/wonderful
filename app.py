@@ -22,6 +22,9 @@ from src.conversation import (
     ConversationResolutionError,
     ConversationState,
 )
+from src.data.public_clients import PublicDataError
+from src.data.public_repository import PublicAirportRepository
+from src.data.repository import FixtureAirportRepository
 from src.explanations import ExplanationGenerator
 from src.llm_client import LMStudioError, LMStudioHealth
 from src.router import (
@@ -32,7 +35,7 @@ from src.router import (
 from src.tools import AirportAnalyticsService
 from src.ui import SUGGESTED_PROMPTS, UiResult, build_model_status, build_ui_result
 
-DISCLAIMER = (
+FIXTURE_DISCLAIMER = (
     "This application screens airport capacity-expansion signals using synthetic "
     "demonstration data and deterministic proxies. It does not estimate actual "
     "investment return or observed lost demand."
@@ -45,6 +48,8 @@ class Runtime:
     conversation: ConversationManager
     explanations: ExplanationGenerator
     policy: RoutingPolicy
+    repository: Any
+    data_disclaimer: str
 
 
 def policy_from_settings(settings: Settings) -> RoutingPolicy:
@@ -58,20 +63,32 @@ def policy_from_settings(settings: Settings) -> RoutingPolicy:
 def _conversation_signature(
     policy: RoutingPolicy,
     min_annual_passengers: int | None,
-) -> tuple[int, int, float, int | None]:
+    data_signature: tuple[Any, ...] | None = None,
+) -> tuple[Any, ...]:
     return (
         policy.ranking_limit,
         policy.long_haul_threshold_miles,
         policy.target_load_factor,
         min_annual_passengers,
+        data_signature,
     )
+
+
+def _repository_from_settings(settings: Settings):
+    """Select exactly one repository without silently crossing data modes."""
+
+    if settings.use_live_data:
+        return PublicAirportRepository.from_settings(settings)
+    return FixtureAirportRepository.from_default_fixtures()
 
 
 def build_runtime(settings: Settings) -> Runtime:
     policy = policy_from_settings(settings)
     client = LMStudioChatClient.from_settings(settings)
+    repository = _repository_from_settings(settings)
     service = AirportAnalyticsService(
-        min_annual_passengers=settings.min_annual_passengers
+        repository=repository,
+        min_annual_passengers=settings.min_annual_passengers,
     )
     dispatcher = ToolDispatcher(service)
     agent = (
@@ -82,22 +99,52 @@ def build_runtime(settings: Settings) -> Runtime:
     fallback = DeterministicFallbackRouter(dispatcher, policy=policy)
     router = AirportQuestionRouter(agent, fallback=fallback)
     conversation = ConversationManager(router, dispatcher, policy=policy)
-    return Runtime(client, conversation, ExplanationGenerator(client), policy)
+    disclaimer = getattr(repository.bundle, "disclaimer", FIXTURE_DISCLAIMER)
+    return Runtime(
+        client,
+        conversation,
+        ExplanationGenerator(client),
+        policy,
+        repository,
+        disclaimer,
+    )
 
 
-def runtime_for_session(settings: Settings) -> Runtime:
-    signature = (
+def _runtime_signature(settings: Settings) -> tuple[Any, ...]:
+    return (
         settings.llm_base_url,
         settings.llm_api_key,
         settings.llm_model,
         settings.use_llm,
+        settings.use_live_data,
+        settings.public_data_year,
+        str(settings.public_data_cache_dir),
+        settings.public_data_cache_ttl_seconds,
+        settings.public_data_max_download_mb,
+        settings.bts_app_token,
         settings.http_timeout_seconds,
         settings.long_haul_threshold_miles,
         settings.target_load_factor,
         settings.min_annual_passengers,
     )
-    cached = st.session_state.get("_runtime")
+
+
+def _data_signature(settings: Settings) -> tuple[Any, ...]:
+    return (
+        settings.use_live_data,
+        settings.public_data_year if settings.use_live_data else None,
+        str(settings.public_data_cache_dir) if settings.use_live_data else None,
+    )
+
+
+def runtime_for_session(settings: Settings) -> Runtime:
+    signature = _runtime_signature(settings)
+    cached: Runtime | None = st.session_state.get("_runtime")
     if cached is None or st.session_state.get("_runtime_signature") != signature:
+        if cached is not None:
+            closer = getattr(cached.repository, "close", None)
+            if callable(closer):
+                closer()
         cached = build_runtime(settings)
         st.session_state["_runtime"] = cached
         st.session_state["_runtime_signature"] = signature
@@ -109,10 +156,15 @@ def synchronize_conversation_session(
     session_state: MutableMapping[str, Any],
     policy: RoutingPolicy,
     min_annual_passengers: int | None = None,
+    data_signature: tuple[Any, ...] | None = None,
 ) -> bool:
     """Reset state and visible history whenever analytical policy changes."""
 
-    signature = _conversation_signature(policy, min_annual_passengers)
+    signature = _conversation_signature(
+        policy,
+        min_annual_passengers,
+        data_signature,
+    )
     changed = session_state.get("_conversation_policy_signature") != signature
     if changed:
         session_state["conversation_state"] = ConversationState.from_policy(
@@ -132,11 +184,13 @@ def synchronize_conversation_session(
 def initialize_session(
     policy: RoutingPolicy,
     min_annual_passengers: int | None = None,
+    data_signature: tuple[Any, ...] | None = None,
 ) -> None:
     synchronize_conversation_session(
         st.session_state,
         policy,
         min_annual_passengers,
+        data_signature,
     )
 
 
@@ -157,7 +211,8 @@ def render_status(runtime: Runtime) -> None:
     refresh = st.button("Refresh LM Studio status", use_container_width=True)
     status = build_model_status(cached_health(runtime, force=refresh))
     renderer = {"success": st.success, "warning": st.warning}.get(
-        status.severity, st.info
+        status.severity,
+        st.info,
     )
     renderer(f"**{status.label}**\n\n{status.detail}")
 
@@ -168,7 +223,9 @@ def render_view(view: UiResult) -> None:
         columns = st.columns(min(4, len(view.cards)))
         for index, card in enumerate(view.cards):
             columns[index % len(columns)].metric(
-                card.label, card.value, help=card.help_text
+                card.label,
+                card.value,
+                help=card.help_text,
             )
     if view.table_rows:
         st.dataframe(
@@ -263,10 +320,11 @@ def handle_prompt(prompt: str, runtime: Runtime) -> None:
             FallbackRoutingError,
             AgentError,
             LMStudioError,
+            PublicDataError,
             ValueError,
         ) as exc:
             message = (
-                "I could not map that request to a supported airport analysis. "
+                "I could not complete that airport analysis. "
                 f"Details: {exc}"
             )
             st.error(message)
@@ -283,7 +341,11 @@ def render_app() -> None:
     )
     settings = get_settings()
     runtime = runtime_for_session(settings)
-    initialize_session(runtime.policy, settings.min_annual_passengers)
+    initialize_session(
+        runtime.policy,
+        settings.min_annual_passengers,
+        _data_signature(settings),
+    )
 
     st.title("Airport Investment Intelligence Agent")
     st.caption(
@@ -294,6 +356,16 @@ def render_app() -> None:
         render_status(runtime)
         st.write(f"LM Studio endpoint: `{settings.llm_base_url}`")
         st.write(f"Configured model: `{settings.llm_model or 'not set'}`")
+        st.write(
+            "Data repository: "
+            + (
+                "**Official FAA/BTS public data**"
+                if settings.use_live_data
+                else "**Illustrative fixture data**"
+            )
+        )
+        if settings.use_live_data:
+            st.write(f"Public analysis year: **{settings.public_data_year}**")
         st.write(
             "Long-haul threshold: "
             f"**{runtime.policy.long_haul_threshold_miles:,} miles**"
@@ -328,7 +400,7 @@ def render_app() -> None:
         handle_prompt(prompt, runtime)
     methodology()
     st.divider()
-    st.caption(DISCLAIMER)
+    st.caption(runtime.data_disclaimer)
 
 
 if __name__ == "__main__":
