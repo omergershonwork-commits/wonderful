@@ -48,6 +48,9 @@ METRICS: dict[str, ComparisonMetric] = {
     "market scale": ComparisonMetric.MARKET_SCALE,
 }
 
+_INTEGER_TOKEN = r"([+-]?[0-9][0-9a-z_,.+-]*)"
+_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
+
 
 class ConversationResolutionError(RuntimeError):
     pass
@@ -152,43 +155,36 @@ def _percent(question: str) -> float | None:
     return value
 
 
-def _miles(question: str) -> int | None:
-    lowered = question.casefold()
-    fractional = re.search(
-        r"(?<![a-z0-9.,])[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d+\s*(?:statute\s+)?miles?\b",
-        lowered,
-    )
-    if fractional:
+def _parse_canonical_integer(token: str, *, field_name: str) -> int:
+    if _CANONICAL_INTEGER.fullmatch(token) is None:
         raise ConversationResolutionError(
-            "mileage threshold must be a whole number"
+            f"{field_name} must be a canonical whole number "
+            "with optional sign and correctly grouped commas"
         )
+    return int(token.replace(",", ""))
+
+
+def _miles(question: str) -> int | None:
     match = re.search(
-        r"(?<![a-z0-9.,])([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))(?![\d,.])\s*(?:statute\s+)?miles?\b",
-        lowered,
+        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\s*(?:statute\s+)?miles?\b",
+        question.casefold(),
     )
     if not match:
         return None
-    value = int(match.group(1).replace(",", ""))
+    value = _parse_canonical_integer(match.group(1), field_name="mileage threshold")
     if value <= 0:
         raise ConversationResolutionError("mileage threshold must be greater than zero")
     return value
 
 
 def _limit(question: str) -> int | None:
-    lowered = question.casefold()
-    fractional = re.search(
-        r"\b(?:top|first|limit(?:\s+to)?)\s+[+-]?\d+(?:\.\d+)(?![\d.])",
-        lowered,
-    )
-    if fractional:
-        raise ConversationResolutionError("ranking limit must be a whole number")
     match = re.search(
-        r"\b(?:top|first|limit(?:\s+to)?)\s+([+-]?\d{1,2})(?![\d,.])",
-        lowered,
+        rf"\b(?:top|first|limit(?:\s+to)?)\s+{_INTEGER_TOKEN}",
+        question.casefold(),
     )
     if not match:
         return None
-    value = int(match.group(1))
+    value = _parse_canonical_integer(match.group(1), field_name="ranking limit")
     if not 1 <= value <= 10:
         raise ConversationResolutionError("ranking limit must be between 1 and 10")
     return value
