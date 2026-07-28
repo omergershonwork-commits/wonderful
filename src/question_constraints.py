@@ -139,6 +139,7 @@ def _parse_canonical_integer(token: str, *, field_name: str) -> int:
 def _rank_limit(question: str) -> int | None:
     lowered = question.casefold()
     patterns = (
+        rf"(?<![a-z0-9])rank(?:\s+the)?\s+{_INTEGER_TOKEN}",
         rf"(?<![a-z0-9])top\s+{_INTEGER_TOKEN}",
         rf"(?<![a-z0-9])limit(?:ed)?(?:\s+to)?\s+{_INTEGER_TOKEN}",
         rf"(?<![a-z0-9])first\s+{_INTEGER_TOKEN}",
