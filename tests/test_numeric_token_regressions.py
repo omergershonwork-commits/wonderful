@@ -64,6 +64,18 @@ def test_noncanonical_integer_tokens(token):
 
 
 @pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("0.85", 0.85),
+        ("+1.0", 1.0),
+        ("1,250.5", 1250.5),
+    ],
+)
+def test_canonical_decimal_tokens(token, expected):
+    assert parse_canonical_decimal(token, field_name="value") == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
     "token",
     ["1e2", "0.8e1", "85,5", "85_5", "85e-1"],
 )
