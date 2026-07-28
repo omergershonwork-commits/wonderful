@@ -1,0 +1,62 @@
+name: Live verification artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project dependencies
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r requirements.txt
+      - name: Verify live BTS retrieval and disk-cache reuse
+        run: python scripts/verify_public_data.py
+
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      USE_LLM: "false"
+      USE_LIVE_DATA: "false"
+      HTTP_TIMEOUT_SECONDS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project and browser dependencies
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
+      - name: Start Streamlit
+        run: |
+          streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8501 > streamlit.log 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8501/_stcore/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat streamlit.log
+          exit 1
+      - name: Capture real demonstration screenshot
+        run: python scripts/capture_app_screenshot.py
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamlit-demo-screenshot
+          path: artifacts/airport-intelligence-demo.png
+          if-no-files-found: error
