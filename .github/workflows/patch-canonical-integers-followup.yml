@@ -1,0 +1,85 @@
+name: Patch canonical integer follow-up
+
+on:
+  push:
+    branches:
+      - codex/fix-canonical-integer-tokens
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-canonical-integer-tokens
+          fetch-depth: 0
+
+      - name: Patch both parsers and regressions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Main question parser.
+          path = Path('src/question_constraints.py')
+          text = path.read_text(encoding='utf-8')
+          old_constants = '''_SIGNED_INTEGER = r"([+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+))"\n_SIGNED_NUMBER = r"([+-]?\\d+(?:\\.\\d+)?)"\n_FRACTIONAL_INTEGER = r"[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)\\.\\d+"\n'''
+          new_constants = '''_SIGNED_NUMBER = r"([+-]?\\d+(?:\\.\\d+)?)"\n_INTEGER_TOKEN = r"([+-]?[0-9](?:[0-9a-z_]|[.,](?=[0-9])|[+-](?=[0-9]))*)"\n_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\\d+|\\d{1,3}(?:,\\d{3})+)")\n'''
+          if old_constants not in text:
+              raise SystemExit('question integer constants block not found')
+          text = text.replace(old_constants, new_constants, 1)
+          start = text.index('def _reject_fractional_integer_overrides')
+          end = text.index('def _target_load_factor')
+          replacement = '''def _parse_canonical_integer(token: str, *, field_name: str) -> int:\n    if _CANONICAL_INTEGER.fullmatch(token) is None:\n        raise ToolArgumentsError(\n            f"{field_name} must be a canonical whole number "\n            "with optional sign and correctly grouped commas"\n        )\n    return int(token.replace(",", ""))\n\n\ndef _rank_limit(question: str) -> int | None:\n    lowered = question.casefold()\n    patterns = (\n        rf"(?<![a-z0-9])top\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9])limit(?:ed)?(?:\\s+to)?\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9])first\\s+{_INTEGER_TOKEN}",\n        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\\s+(?:airports|candidates)(?![a-z0-9])",\n    )\n    for pattern in patterns:\n        match = re.search(pattern, lowered)\n        if match:\n            return _parse_canonical_integer(match.group(1), field_name="ranking limit")\n    return None\n\n\ndef _threshold_miles(question: str) -> int | None:\n    match = re.search(\n        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\\s*(?:statute\\s+)?miles?(?![a-z0-9])",\n        question.casefold(),\n    )\n    if not match:\n        return None\n    return _parse_canonical_integer(match.group(1), field_name="mileage threshold")\n\n\n'''
+          text = text[:start] + replacement + text[end:]
+          text = text.replace('    _reject_fractional_integer_overrides(question)\n', '', 1)
+          path.write_text(text, encoding='utf-8')
+
+          # Contextual follow-up parser.
+          path = Path('src/conversation.py')
+          text = path.read_text(encoding='utf-8')
+          insertion_point = text.index('\n\n\nclass ConversationResolutionError')
+          constants = '''\n\n_INTEGER_TOKEN = r"([+-]?[0-9](?:[0-9a-z_]|[.,](?=[0-9])|[+-](?=[0-9]))*)"\n_CANONICAL_INTEGER = re.compile(r"[+-]?(?:\\d+|\\d{1,3}(?:,\\d{3})+)")'''
+          if '_CANONICAL_INTEGER = re.compile' not in text:
+              text = text[:insertion_point] + constants + text[insertion_point:]
+          start = text.index('def _miles')
+          end = text.index('class ConversationManager')
+          replacement = '''def _parse_canonical_integer(token: str, *, field_name: str) -> int:\n    if _CANONICAL_INTEGER.fullmatch(token) is None:\n        raise ConversationResolutionError(\n            f"{field_name} must be a canonical whole number "\n            "with optional sign and correctly grouped commas"\n        )\n    return int(token.replace(",", ""))\n\n\ndef _miles(question: str) -> int | None:\n    match = re.search(\n        rf"(?<![a-z0-9]){_INTEGER_TOKEN}\\s*(?:statute\\s+)?miles?\\b",\n        question.casefold(),\n    )\n    if not match:\n        return None\n    value = _parse_canonical_integer(match.group(1), field_name="mileage threshold")\n    if value <= 0:\n        raise ConversationResolutionError("mileage threshold must be greater than zero")\n    return value\n\n\ndef _limit(question: str) -> int | None:\n    match = re.search(\n        rf"\\b(?:top|first|limit(?:\\s+to)?)\\s+{_INTEGER_TOKEN}",\n        question.casefold(),\n    )\n    if not match:\n        return None\n    value = _parse_canonical_integer(match.group(1), field_name="ranking limit")\n    if not 1 <= value <= 10:\n        raise ConversationResolutionError("ranking limit must be between 1 and 10")\n    return value\n\n\n'''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          # Main parser unit regressions.
+          test_path = Path('tests/test_agent_grounding.py')
+          tests = test_path.read_text(encoding='utf-8')
+          addition = '''\n\n@pytest.mark.parametrize(\n    ("tool_name", "arguments", "question"),\n    [\n        ("rank_airports", {"region": "New England", "limit": 3, "excluded_airports": []}, "Rank the top 3e1 New England airports"),\n        ("rank_airports", {"region": "New England", "limit": 3, "excluded_airports": []}, "Rank the top 3_5 New England airports"),\n        ("rank_airports", {"region": "New England", "limit": 5, "excluded_airports": []}, "Rank 3,5 New England airports"),\n        ("calculate_long_haul_share", {"airport_code": "ANC", "threshold_miles": 500}, "What share of ANC flights are long haul using 2_500 miles?"),\n        ("calculate_long_haul_share", {"airport_code": "ANC"}, "What share of ANC flights are long haul using 2e3 miles?"),\n        ("calculate_long_haul_share", {"airport_code": "ANC"}, "What share of ANC flights are long haul using 2,50 miles?"),\n    ],\n)\ndef test_noncanonical_integer_tokens_fail_closed(tool_name, arguments, question):\n    with pytest.raises(ToolArgumentsError, match="canonical whole number"):\n        route(tool_name, arguments, question)\n\n\n@pytest.mark.parametrize(\n    ("question", "expected"),\n    [\n        ("What share of ANC flights are long haul using 2500 miles?", 2500),\n        ("What share of ANC flights are long haul using 2,500 miles?", 2500),\n        ("What share of ANC flights are long haul using +2500 miles?", 2500),\n    ],\n)\ndef test_canonical_mileage_tokens_are_preserved(question, expected):\n    result = route(\n        "calculate_long_haul_share",\n        {"airport_code": "ANC", "threshold_miles": expected},\n        question,\n    )\n    assert result.arguments["threshold_miles"] == expected\n'''
+          if 'test_noncanonical_integer_tokens_fail_closed' not in tests:
+              test_path.write_text(tests.rstrip() + addition + '\n', encoding='utf-8')
+
+          # Conversation unit regressions.
+          test_path = Path('tests/test_conversation_review_fixes.py')
+          tests = test_path.read_text(encoding='utf-8')
+          addition = '''\n\n@pytest.mark.parametrize("question", ["What about top 3e1?", "What about top 3_5?", "What about top 3,5?"])\ndef test_noncanonical_contextual_ranking_limit_fails_closed(question):\n    state = ConversationState(region="New England")\n    with pytest.raises(ConversationResolutionError, match="canonical whole number"):\n        manager().handle(question, state)\n\n\n@pytest.mark.parametrize("question", ["Use 2_500 miles", "Use 2e3 miles", "Use 2,50 miles"])\ndef test_noncanonical_contextual_mileage_fails_closed(question):\n    state = ConversationState(airport_codes=("ANC",))\n    with pytest.raises(ConversationResolutionError, match="canonical whole number"):\n        manager().handle(question, state)\n\n\n@pytest.mark.parametrize(\n    ("question", "expected"),\n    [("Use 2500 miles", 2500), ("Use 2,500 miles", 2500), ("Use +2500 miles", 2500)],\n)\ndef test_canonical_contextual_mileage_is_preserved(question, expected):\n    state = ConversationState(airport_codes=("ANC",))\n    turn = manager().handle(question, state)\n    assert turn.execution.arguments["threshold_miles"] == expected\n'''
+          if 'test_noncanonical_contextual_ranking_limit_fails_closed' not in tests:
+              test_path.write_text(tests.rstrip() + addition + '\n', encoding='utf-8')
+
+          # End-to-end regressions.
+          test_path = Path('tests/test_offline_acceptance.py')
+          tests = test_path.read_text(encoding='utf-8')
+          addition = '''\n\n@pytest.mark.parametrize(\n    "question",\n    [\n        "Rank the top 3e1 New England airports",\n        "Rank the top 3_5 New England airports",\n        "Rank 3,5 New England airports",\n        "What share of ANC flights are long haul using 2_500 miles?",\n        "What share of ANC flights are long haul using 2e3 miles?",\n        "What share of ANC flights are long haul using 2,50 miles?",\n    ],\n)\ndef test_noncanonical_integer_tokens_fail_in_complete_offline_path(offline_runtime, question):\n    _, _, router = offline_runtime\n    with pytest.raises(FallbackRoutingError):\n        router.route(question)\n\n\n@pytest.mark.parametrize(\n    ("question", "state"),\n    [\n        ("What about top 3e1?", ConversationState(region="New England")),\n        ("What about top 3_5?", ConversationState(region="New England")),\n        ("Use 2_500 miles", ConversationState(airport_codes=("ANC",))),\n        ("Use 2e3 miles", ConversationState(airport_codes=("ANC",))),\n        ("Use 2,50 miles", ConversationState(airport_codes=("ANC",))),\n    ],\n)\ndef test_noncanonical_contextual_tokens_fail_in_complete_offline_path(offline_runtime, question, state):\n    policy, dispatcher, router = offline_runtime\n    manager = ConversationManager(router, dispatcher, policy=policy)\n    with pytest.raises(ConversationResolutionError, match="canonical whole number"):\n        manager.handle(question, state)\n'''
+          if 'test_noncanonical_integer_tokens_fail_in_complete_offline_path' not in tests:
+              test_path.write_text(tests.rstrip() + addition + '\n', encoding='utf-8')
+          PY
+
+      - name: Remove temporary workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/patch-canonical-integers-followup.yml
+          git config user.name "omergershonwork-commits"
+          git config user.email "237711942+omergershonwork-commits@users.noreply.github.com"
+          git add src/question_constraints.py src/conversation.py tests/test_agent_grounding.py tests/test_conversation_review_fixes.py tests/test_offline_acceptance.py .github/workflows/patch-canonical-integers-followup.yml
+          git commit -m "fix(parser): reject noncanonical integer tokens"
+          git push origin HEAD:codex/fix-canonical-integer-tokens
