@@ -15,9 +15,14 @@ class Settings(BaseSettings):
     use_llm: bool = True
 
     use_live_data: bool = False
+    public_data_year: int = Field(default=2025, ge=1991, le=2200)
     http_timeout_seconds: int = Field(default=20, gt=0, le=120)
     public_data_cache_dir: Path = Path("data/cache/public")
-    public_data_cache_ttl_seconds: int = Field(default=86_400, ge=0, le=2_592_000)
+    public_data_cache_ttl_seconds: int = Field(
+        default=86_400,
+        ge=0,
+        le=2_592_000,
+    )
     public_data_max_download_mb: int = Field(default=100, gt=0, le=1_024)
     bts_app_token: str = ""
 
@@ -38,7 +43,9 @@ class Settings(BaseSettings):
         """Require a percentage represented as a decimal in the interval ``(0, 1]``."""
 
         if not 0 < value <= 1:
-            raise ValueError("TARGET_LOAD_FACTOR must be greater than 0 and at most 1")
+            raise ValueError(
+                "TARGET_LOAD_FACTOR must be greater than 0 and at most 1"
+            )
         return value
 
 
